@@ -1,9 +1,7 @@
 kind: container
-
 iam:
   oidcSubjects:
     - repo:bitovi/litellm:ref:refs/tags/v*
-
 app:
   name: claude-usage-proxy
   # This repo, not claude-usage-proxy: ESO's per-app PushSecret
@@ -23,21 +21,17 @@ app:
     LITELLM_USE_SHORT_MCP_TOOL_PREFIX: "true"
     REDIS_HOST: claude-usage-proxy-valkey
     REDIS_PORT: "6379"
-
 # Do not edit by hand - update-deploy-values (publish-platform-proxy-image.yml)
 # writes this on every vX.Y.Z release.
 image:
-  tag: ""
-
+  tag: "v0.0.1"
 ingress:
   host: llm-proxy.bitovi-tools.com
-
 onePasswordItem:
   enabled: true
   itemPath: vaults/bitovi-platform/items/claude-usage-proxy-secrets
   annotations:
     operator.1password.io/auto-restart: "true"
-
 postgres:
   enabled: true
   instances: 2
@@ -47,21 +41,17 @@ postgres:
     storageClass: gp3
   backup:
     enabled: true
-
 bedrock:
   enabled: true
   serviceAccountName: claude-usage-proxy
   serviceAccountNamespace: claude-usage-proxy
-
 database:
   fromCnpg:
     enabled: true
-
 configMap:
   name: litellm-config
   mountPath: /app/config.yaml
   subPath: litellm_config.yaml
-
 container:
   command:
     - litellm
@@ -69,9 +59,7 @@ container:
     - /app/config.yaml
     - --port
     - "4000"
-
 replicaCount: 1
-
 autoscaling:
   enabled: true
   minReplicas: 1
