@@ -16,6 +16,7 @@ import PassThroughRoutesSelector from "../common_components/PassThroughRoutesSel
 import RateLimitTypeFormItem from "../common_components/RateLimitTypeFormItem";
 import OrganizationDropdown from "../common_components/OrganizationDropdown";
 import { extractLoggingSettings, formatMetadataForDisplay, stripTagsFromMetadata } from "../key_info_utils";
+import { BudgetFallbacksEditor } from "../key_team_helpers/BudgetFallbacksEditor";
 import { BudgetWindowEntry, BudgetWindowsEditor } from "../key_team_helpers/BudgetWindowsEditor";
 import { KeyResponse } from "../key_team_helpers/key_list";
 import { ModelMaxBudgetEditor } from "../key_team_helpers/ModelMaxBudgetEditor";
@@ -113,6 +114,9 @@ export function KeyEditView({
   const [isKeySaving, setIsKeySaving] = useState(false);
   const [budgetLimits, setBudgetLimits] = useState<BudgetWindowEntry[]>(
     Array.isArray(keyData.budget_limits) ? keyData.budget_limits : [],
+  );
+  const [budgetFallbacks, setBudgetFallbacks] = useState<Record<string, string[]>>(
+    keyData.budget_fallbacks && typeof keyData.budget_fallbacks === "object" ? keyData.budget_fallbacks : {},
   );
   const { data: organizations, isLoading: isOrganizationsLoading } = useOrganizations();
   const { data: projects } = useProjects();
@@ -310,6 +314,7 @@ export function KeyEditView({
         values.budget_limits = [];
       }
 
+<<<<<<< HEAD
       // Only admins can set per-model budgets; the backend 403s if a non-admin
       // sends the field at all, so strip it for them. For admins, coerce an empty
       // editor to {} so clearing all overrides actually removes them on the key.
@@ -317,6 +322,13 @@ export function KeyEditView({
         values.model_max_budget = values.model_max_budget ?? {};
       } else {
         delete values.model_max_budget;
+=======
+      const hadExistingFallbacks = keyData.budget_fallbacks != null && Object.keys(keyData.budget_fallbacks).length > 0;
+      if (Object.keys(budgetFallbacks).length > 0) {
+        values.budget_fallbacks = budgetFallbacks;
+      } else if (hadExistingFallbacks) {
+        values.budget_fallbacks = {};
+>>>>>>> v1.92.0
       }
 
       await onSubmit(values);
@@ -487,6 +499,7 @@ export function KeyEditView({
         <BudgetWindowsEditor value={budgetLimits} onChange={setBudgetLimits} />
       </Form.Item>
 
+<<<<<<< HEAD
       {canManageKeyModelBudget && (
         <Form.Item
           label={
@@ -502,6 +515,24 @@ export function KeyEditView({
           <ModelMaxBudgetEditor modelOptions={availableModels} />
         </Form.Item>
       )}
+=======
+      <Form.Item
+        label={
+          <span>
+            Budget Fallbacks{" "}
+            <Tooltip title="When a model exceeds its per-model budget, requests automatically reroute to fallback models instead of failing">
+              <InfoCircleOutlined style={{ marginLeft: "4px" }} />
+            </Tooltip>
+          </span>
+        }
+      >
+        <BudgetFallbacksEditor
+          value={budgetFallbacks}
+          onChange={setBudgetFallbacks}
+          availableModels={availableModels}
+        />
+      </Form.Item>
+>>>>>>> v1.92.0
 
       <Form.Item label="TPM Limit" name="tpm_limit">
         <NumericalInput min={0} />
