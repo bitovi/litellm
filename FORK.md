@@ -2,13 +2,15 @@
 
 Bitovi fork of [BerriAI/litellm](https://github.com/BerriAI/litellm). We keep upstream LiteLLM stable releases while carrying Bitovi-specific features and platform deploy config.
 
+Related ops docs: [DEPLOYMENT.md](DEPLOYMENT.md), [DB_RESET.md](DB_RESET.md). Feature ownership package: [bitovi/litellm_bitovi/README.md](bitovi/litellm_bitovi/README.md)
+
 ## Remotes and branches
 
 | Remote / branch | Purpose |
 |-----------------|---------|
 | `origin` | `https://github.com/bitovi/litellm.git` |
 | `upstream` | `https://github.com/BerriAI/litellm.git` |
-| `litellm_internal_staging` (ours) | Working base for all Bitovi work and PRs |
+| `litellm_internal_staging` (ours) | Working base for all Bitovi work and PRs (our trunk) |
 | BerriAI `litellm_internal_staging` | Their internal integration branch; **do not sync from it** (name collision is coincidental) |
 | `upstream/main` | Their development tip (nightlies / `dev`); **do not sync from it** |
 
@@ -19,112 +21,110 @@ git remote add upstream https://github.com/BerriAI/litellm.git
 git fetch upstream --tags
 ```
 
+## Compose vs fork (read this before changing code)
+
+Upstream moves weekly. Bitovi features that **edit the same shared files** conflict forever. Features that **live in owned paths** and call into LiteLLM through thin seams usually merge cleanly.
+
+```text
+Upstream LiteLLM (moves fast)
+        |
+        |  thin seams (config hooks / one-line call-outs)
+        v
+bitovi/litellm_bitovi/  + owned UI folders  (edit freely; rarely conflict)
+```
+
+**Rename storms** (upstream moves a page tree) still hurt once; wrappers do not fix renames. They stop you from re-solving the same VK/budget hunks every tag.
+
+### Where new code goes
+
+1. Prefer `bitovi/litellm_bitovi/...` for proxy/auth/budget/SSO logic
+2. Prefer `ui/litellm-dashboard/src/components/bitovi/` or existing owned UI folders for dashboard panels
+3. Wire with config hooks (`custom_key_generate`, `callbacks`, …) or a **short** call-out in an upstream file
+4. Tests under `tests/test_litellm/bitovi/`
+5. Only expand a shared upstream file when a seam is impossible; document why in the PR
+
+### Owned paths (low conflict)
+
+| Area | Where |
+|------|-------|
+| Bitovi extension package | `bitovi/litellm_bitovi/**` |
+| Config teams / YAML budgets | `bitovi/litellm_bitovi/proxy/config_teams/` (shims under old litellm paths) |
+| VK ownership defaults | `bitovi/litellm_bitovi/proxy/key_hooks/` |
+| Model budget windows | `bitovi/litellm_bitovi/proxy/budget/` |
+| SSO user-cap policy | `bitovi/litellm_bitovi/proxy/sso/` |
+| Usage / my-budgets UI | `ui/litellm-dashboard/src/components/UsagePage/**` |
+| Per-model budget UI | `ui/.../key_team_helpers/ModelMaxBudget*` |
+| Platform deploy | `deploy/values.yaml`, `.github/workflows/publish-*.yml` |
+| Fork CI / sync | `.github/workflows/fork-compatibility-check.yml`, `test.yml` |
+| Mantle SigV4 delta | `litellm/llms/bedrock_mantle/common_utils.py` (provider itself is upstream; keep Bitovi `service_name`) |
+
+### Intentional shared-file seams (keep short; ratchet down)
+
+| Seam | Upstream call site | Owned module |
+|------|--------------------|--------------|
+| Config teams parse + sync | `litellm/proxy/proxy_server.py` | `litellm_bitovi.proxy.config_teams` |
+| Config team locks | `team_endpoints.py` | same |
+| VK auto-assign | `key_management_endpoints.py` | `litellm_bitovi.proxy.key_hooks` |
+| Budget window helpers | `hooks/model_max_budget_limiter.py` | `litellm_bitovi.proxy.budget` |
+| SSO 5-user gate | `ui_sso.py`, enterprise `internal_user_endpoints.py` | `litellm_bitovi.proxy.sso.policy` |
+| Redis datetime JSON | `redis_cache.py`, `cache_pydantic_utils.py` | keep tiny; prefer upstream PR |
+
+### Upstream PR candidates vs keep-fork-local
+
+| Prefer upstreaming | Keep Bitovi-local |
+|--------------------|-------------------|
+| Mantle SigV4 `service_name` | Config teams YAML sync |
+| Redis datetime cache serialization | Windowed model budgets, VK auto-assign |
+| | SSO non-premium unlock, my-budgets UI |
+
 ## Sync source: stable tags only
 
-Sync from the latest upstream **stable** git tag matching `^v[0-9]+\.[0-9]+\.[0-9]+$` (for example `v1.92.0`, `v1.91.3`).
+Sync from the latest upstream **stable** git tag matching `^v[0-9]+\.[0-9]+\.[0-9]+$` (for example `v1.93.0`).
 
-Do **not** sync from:
-
-- `upstream/main` (currently tracks nightlies such as `v1.94.0-dev.N`)
-- BerriAI’s `litellm_internal_staging`
-- Tags with `-dev`, `-rc`, or `nightly`
-
-BerriAI’s cycle is `dev` → `rc` → stable ([release cycle](https://docs.litellm.ai/docs/proxy/release_cycle)). Stables are weekly (often Sunday) with PATCH tags for hotfixes. Prefer both weekly minors and patches.
-
-Check status locally:
+Do **not** sync from `upstream/main`, BerriAI’s `litellm_internal_staging`, or tags with `-dev` / `-rc` / `nightly`.
 
 ```bash
 make fork-sync-status
 ```
 
-## Fork-owned changes
-
-Keep these when resolving sync conflicts; everything else should stay close to upstream.
-
-| Area | What | Where |
-|------|------|-------|
-| Bedrock Mantle | Provider with bearer / SigV4 auth, chat + Responses transforms | `litellm/llms/bedrock_mantle/`, `tests/test_litellm/llms/bedrock_mantle/` |
-| Team / virtual keys | Auto-assign team on VK generation, default team for personal keys, VK perms fixes, per-model budgets / spend tracing, admin budget UI | proxy key/team paths and related UI |
-| Usage / budgets | Windowing, config-based budgets, usage data | proxy spend / budget code |
-| Platform deploy | Proxy URL, email allowlist, MCP tool prefix, Valkey `-primary` hostname, OnePassword/ESO, publish workflows | `deploy/values.yaml`, `.github/workflows/publish-*.yml` |
-
-Auth contract to preserve for Mantle: `BedrockMantleAuthMixin`, `_resolve_bearer_token`, `_resolve_region`.
-
-If upstream moves provider transforms into Rust, Mantle will need a Rust port; watch provider/auth RFCs when reviewing sync PRs.
-
 ## Day-to-day feature work
 
-Branch from **current** `litellm_internal_staging`. Open PRs **into** `litellm_internal_staging` (not `main`).
+Branch from **current** `litellm_internal_staging`. Open PRs **into** `litellm_internal_staging`.
 
 ```bash
 make fork-branch NAME=litellm_my_change
-# implement, push, open PR with base litellm_internal_staging
+# implement under bitovi/litellm_bitovi or owned UI paths
+# push, open PR with base litellm_internal_staging
 ```
 
-Branch names: `litellm_<short_description>`, no `/` in the name.
-
-Do not branch from `upstream/main` or a stable tag for Bitovi-only work; that drops Mantle, team/VK, and deploy changes from your starting point.
+Branch names: `litellm_<short_description>`, no `/` in the branch name.
 
 ## Upstream sync
 
 ### Automated (preferred)
 
-`.github/workflows/fork-compatibility-check.yml` runs Mondays and Thursdays (and on `workflow_dispatch`). When a newer stable tag exists than our staging tip contains, it:
+`.github/workflows/fork-compatibility-check.yml` opens `sync/upstream-vX.Y.Z` PRs into `litellm_internal_staging` when a newer stable tag exists. It never merges for you.
 
-1. Points `sync/upstream-vX.Y.Z` at the **stable tag tip**, then restores Bitovi’s `.github/workflows` (so we do not adopt BerriAI CI)
-2. Opens (or refreshes) a PR **into** `litellm_internal_staging` so GitHub can show real merge conflicts on product code
-3. Labels `upstream-sync` (and `needs-conflict-resolution` when a trial merge finds conflicts)
-4. Runs Bedrock Mantle checks on the current staging tip
-5. Notifies via the PR and optional Slack (`SLACK_WEBHOOK_URL` secret)
-
-**The Action never merges into `litellm_internal_staging`.** A person resolves conflicts (if any) and merges the PR.
-
-Large diffs (often 1000+ files) are normal for a weekly stable: release tags are not always linear, and `litellm/proxy/_experimental/out/**` UI build assets churn a lot.
+**Merge the sync PR with a merge commit** (do not squash or rebase the sync PR). That preserves conflict resolution ancestry for the next tag.
 
 ### Junior review guide (sync PRs)
 
-**Do not merge if** GitHub shows **This branch has conflicts that must be resolved**.
-
-**What to do:**
-
-1. Open the PR → click **Resolve conflicts** (or merge the tag into staging locally)
-2. For each conflicted file, choose sides using:
+Do not merge while GitHub shows **This branch has conflicts that must be resolved**.
 
 | Path pattern | Prefer |
 |--------------|--------|
-| `litellm/llms/bedrock_mantle/**` | Bitovi (staging) |
-| `litellm/proxy/auth/**`, key/team/budget proxy code | Bitovi when both changed; read both sides |
-| `tests/e2e/budgets/**`, VK/budget UI (`ui/**/key_*`) | Bitovi |
-| `deploy/**`, `.github/workflows/publish-*.yml` | Bitovi |
+| `bitovi/**` | Bitovi |
+| `litellm/llms/bedrock_mantle/**` | Bitovi (SigV4 contract) |
+| `litellm/proxy/auth/**`, key/team/budget call-outs | Bitovi when both changed; read both sides |
+| `tests/test_litellm/bitovi/**`, `tests/e2e/quota_management/budgets/**` | Bitovi |
+| `ui/**/UsagePage/**`, `ui/**/bitovi/**`, `ModelMaxBudget*` | Bitovi |
+| `deploy/**`, Bitovi `.github/workflows/publish-*.yml`, `test.yml`, `fork-compatibility-check.yml` | Bitovi |
 | `ui/**/eslint-metrics.json`, `litellm/proxy/_experimental/out/**` | Upstream / regenerate |
-| Everything else | Prefer upstream unless you know it is Bitovi-owned |
+| Everything else | Prefer upstream unless you know it is a Bitovi seam |
 
-3. When the conflict banner is gone and the PR looks right, merge into `litellm_internal_staging`
+### Required: `FORK_SYNC_TOKEN`
 
-The Action points the sync branch at the **stable tag tip** for product code, then restores Bitovi’s `.github/workflows`. GitHub can show real product conflicts; we do not merge BerriAI’s CI into Bitovi.
-
-### Required: `FORK_SYNC_TOKEN` (PR create)
-
-`GITHUB_TOKEN` often cannot open PRs even when the repo checkbox **Allow GitHub Actions to create and approve pull requests** is enabled. Common reasons:
-
-- Org (or Enterprise) Actions settings still disallow PR create, which overrides the repo
-- Workflow permissions are still **Read** only (the create-PR checkbox is separate from Read and write)
-- `gh pr create` uses GraphQL `createPullRequest`, which fails with “Resource not accessible by integration”
-
-This Action creates PRs via the **REST** API and expects a PAT:
-
-1. Create a **classic** PAT with `repo` **and** `workflow` (needed to push the sync branch while keeping Bitovi’s `.github/workflows` instead of BerriAI’s), or a fine-grained PAT on `bitovi/litellm` with Contents, Pull requests, Issues, and Actions/workflows write
-2. Add it as repo secret `FORK_SYNC_TOKEN` (Settings → Secrets and variables → Actions)
-3. Re-run the workflow
-
-We do **not** intend to take upstream’s CI. The sync branch is the stable tag for product code, then staging’s workflows are restored so the PR does not replace Bitovi Actions. GitHub still requires `workflow` scope to push that workflows commit.
-
-Optional (only helps `GITHUB_TOKEN` fallback; PAT is still recommended):
-
-- Repo **and** org: Settings → Actions → General → Workflow permissions → **Read and write permissions**
-- Same page: enable **Allow GitHub Actions to create and approve pull requests** (must be allowed at org/enterprise first if the repo checkbox is grayed or ineffective)
-
-Optional: `SLACK_WEBHOOK_URL` for Slack alerts (incoming webhook URL).
+See workflow comments; classic PAT with `repo` + `workflow` (or fine-grained Contents / PRs / Issues / Actions write). Optional: `SLACK_WEBHOOK_URL`.
 
 ### Manual fallback
 
@@ -132,33 +132,30 @@ Optional: `SLACK_WEBHOOK_URL` for Slack alerts (incoming webhook URL).
 git fetch upstream --tags
 git checkout litellm_internal_staging
 git pull origin litellm_internal_staging
-git merge vX.Y.Z   # or: git rebase vX.Y.Z && git push --force-with-lease
-pytest tests/test_litellm/llms/bedrock_mantle/ -v
-# smoke team/VK paths if those files conflicted
-git push origin litellm_internal_staging
+git merge --no-ff vX.Y.Z
+# resolve per table above
+# smoke (below), then push
 ```
 
-After the sync PR (or manual merge) lands on staging, deploy via the existing Bitovi publish/tag workflows.
+### Post-sync smoke
 
-### Conflict expectations
+```bash
+pytest tests/test_litellm/llms/bedrock_mantle/ -q
+pytest tests/test_litellm/bitovi/ -q
+pytest tests/test_litellm/proxy/common_utils/test_cache_codec.py -q  # if present
+# optional: usage UI typecheck / vitest for UsagePage if UI conflicted
+```
 
-Conflicts should concentrate in Mantle, team/VK/budget code, and `deploy/`. Widespread unrelated conflicts mean upstream refactored shared surfaces; stop and inspect before forcing.
+After sync lands: deploy via Bitovi publish/tag workflows.
+
+## CI note
+
+Bitovi does not run BerriAI’s full Actions set. Active workflows live under `.github/workflows/` (`test.yml`, publish, fork sync). Upstream copies may appear under `.github/workflows-backup/` and should not be adopted.
 
 ## Contribute back to BerriAI (rare)
-
-Only when opening a PR against **BerriAI/litellm**. Branch from a clean `upstream/main` so the PR does not include Bitovi-only commits:
 
 ```bash
 make upstream-branch NAME=litellm_upstream_fix
 ```
 
-If the change is useful both places, land it on BerriAI first, then pick it up here via the next stable-tag sync (or cherry-pick onto staging sooner if needed).
-
-## Keeping current
-
-1. Ensure `FORK_SYNC_TOKEN` is set so the Action can open sync PRs
-2. Review open `upstream-sync` PRs using the junior guide above (resolve via GitHub conflict UI when shown)
-3. Do not merge while the GitHub conflicts banner is present
-4. Optionally set `SLACK_WEBHOOK_URL` for alerts
-5. Watch upstream release notes / breaking signals in provider auth, proxy team/key APIs, Helm/deploy
-6. After each sync lands: Mantle pytest; smoke team/VK if those areas changed
+Branch from clean `upstream/main` so the PR does not include Bitovi-only commits. Prefer upstreaming Mantle SigV4 and Redis datetime fixes when possible.

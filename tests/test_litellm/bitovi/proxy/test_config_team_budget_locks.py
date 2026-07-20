@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from litellm.proxy.management_endpoints.team_endpoints import _reject_config_team_budget_mutation
-from litellm.proxy.management_helpers.config_teams_sync import (
+from litellm_bitovi.proxy.config_teams import (
     CONFIG_MEMBER_BUDGET_FIELDS,
     CONFIG_TEAM_BUDGET_FIELDS,
     CONFIG_TEAM_METADATA_KEY,

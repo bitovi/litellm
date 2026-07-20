@@ -64,6 +64,7 @@ proxy = [
     "mcp>=1.28.1,<2.0",
     "litellm-proxy-extras==0.4.76",
     "litellm-enterprise==0.1.49",
+    "litellm-bitovi==0.1.0",
     "RestrictedPython>=8.1,<9.0",
     "rich>=13.9.4,<14.0",
     "polars>=1.38.1,<2.0",
@@ -278,9 +279,10 @@ exclude-newer = "3 days"
 [tool.uv.sources]
 litellm-proxy-extras = { workspace = true }
 litellm-enterprise = { workspace = true }
+litellm-bitovi = { workspace = true }
 
 [tool.uv.workspace]
-members = ["enterprise", "litellm-proxy-extras"]
+members = ["enterprise", "litellm-proxy-extras", "bitovi"]
 
 [tool.isort]
 profile = "black"

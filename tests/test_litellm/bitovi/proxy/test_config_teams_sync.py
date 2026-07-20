@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from litellm.proxy.management_helpers.config_teams_sync import (
+from litellm_bitovi.proxy.config_teams import (
     CONFIG_TEAM_METADATA_KEY,
     apply_team_member_budget_to_sa_key,
     extract_model_list_budgets,
@@ -18,7 +18,7 @@ from litellm.proxy.management_helpers.config_teams_sync import (
     sync_config_teams,
     team_is_from_config,
 )
-from litellm.types.proxy.management_endpoints.config_teams import ConfigTeamEntry
+from litellm_bitovi.proxy.config_teams.types import ConfigTeamEntry
 from litellm.types.utils import BudgetConfig
 
 

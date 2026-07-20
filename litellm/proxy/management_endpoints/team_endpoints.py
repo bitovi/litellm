@@ -213,7 +213,7 @@ def _reject_config_team_budget_mutation(
     payload: dict,
     field_names: frozenset,
 ) -> None:
-    from litellm.proxy.management_helpers.config_teams_sync import (
+    from litellm_bitovi.proxy.config_teams import (
         budget_fields_in_payload,
         is_config_team_sync_active,
         team_is_from_config,
@@ -1747,7 +1747,7 @@ async def update_team(
                 detail={"error": f"Team not found, passed team_id={data.team_id}"},
             )
 
-        from litellm.proxy.management_helpers.config_teams_sync import CONFIG_TEAM_BUDGET_FIELDS
+        from litellm_bitovi.proxy.config_teams import CONFIG_TEAM_BUDGET_FIELDS
 
         existing_metadata = existing_team_row.metadata
         if isinstance(existing_metadata, str):
@@ -1871,7 +1871,7 @@ async def update_team(
         # be written by the same code path that creates the underlying rows.
         if isinstance(updated_kv.get("metadata"), dict):
             TeamMemberBudgetHandler.strip_system_managed_metadata_keys(updated_kv["metadata"])
-            from litellm.proxy.management_helpers.config_teams_sync import (
+            from litellm_bitovi.proxy.config_teams import (
                 CONFIG_TEAM_METADATA_KEY,
                 team_is_from_config,
             )
@@ -3019,7 +3019,7 @@ async def team_member_update(
         )
     existing_team_row = LiteLLM_TeamTable(**_existing_team_row.model_dump())
 
-    from litellm.proxy.management_helpers.config_teams_sync import CONFIG_MEMBER_BUDGET_FIELDS
+    from litellm_bitovi.proxy.config_teams import CONFIG_MEMBER_BUDGET_FIELDS
 
     _reject_config_team_budget_mutation(
         team_metadata=existing_team_row.metadata,
@@ -3746,7 +3746,7 @@ async def team_info(
         # Resolve resources inherited from access groups
         await _resolve_team_access_group_resources(_team_info)
 
-        from litellm.proxy.management_helpers.config_teams_sync import team_is_from_config
+        from litellm_bitovi.proxy.config_teams import team_is_from_config
 
         _team_info.is_from_config = team_is_from_config(_team_info.metadata)
 
