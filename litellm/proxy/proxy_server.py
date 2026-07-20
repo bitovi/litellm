@@ -639,8 +639,14 @@ except ImportError:
 
 server_root_path = get_server_root_path()
 _license_check = LicenseCheck()
-# Bitovi: unlock Enterprise-gated features (guardrails, etc.) without LITELLM_LICENSE.
-from litellm_bitovi.proxy.license.policy import resolve_premium_user as _resolve_premium_user
+
+
+def _resolve_premium_user(license_says_premium: bool) -> bool:
+    # Bitovi: unlock Enterprise-gated features (guardrails, etc.) without LITELLM_LICENSE.
+    from litellm_bitovi.proxy.license.policy import resolve_premium_user
+
+    return resolve_premium_user(license_says_premium)
+
 
 premium_user: bool = _resolve_premium_user(_license_check.is_premium())
 premium_user_data: Optional["EnterpriseLicenseData"] = _license_check.airgapped_license_data
