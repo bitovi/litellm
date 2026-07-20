@@ -37,17 +37,22 @@ USER root
 COPY --from=uvbin /uv /usr/local/bin/uv
 COPY --from=uvbin /uvx /usr/local/bin/uvx
 
-RUN apk add --no-cache \
-    bash \
-    gcc \
-    python3 \
-    python3-dev \
-    rust \
-    openssl \
-    openssl-dev \
-    nodejs \
-    npm \
-    libsndfile
+# Retry for transient apk.cgr.dev flakes (same pattern as gateway/backend).
+RUN for i in 1 2 3; do \
+      apk add --no-cache \
+        bash \
+        gcc \
+        python3 \
+        python3-dev \
+        rust \
+        openssl \
+        openssl-dev \
+        nodejs \
+        npm \
+        libsndfile && break; \
+      [ $i = 3 ] && { echo "apk add failed after 3 retries" >&2; exit 1; }; \
+      sleep 5; \
+    done
 
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     UV_LINK_MODE=copy \
@@ -100,7 +105,11 @@ FROM $LITELLM_RUNTIME_IMAGE AS runtime
 USER root
 
 # node (without npm) is required by the prisma CLI at runtime
-RUN apk add --no-cache bash openssl tzdata nodejs python3 libsndfile
+RUN for i in 1 2 3; do \
+      apk add --no-cache bash openssl tzdata nodejs python3 libsndfile && break; \
+      [ $i = 3 ] && { echo "apk add failed after 3 retries" >&2; exit 1; }; \
+      sleep 5; \
+    done
 
 WORKDIR /app
 ENV PATH="/app/.venv/bin:${PATH}" \

@@ -15,6 +15,7 @@ litellm_bitovi/
     key_hooks/      # VK auto-assign user/team on generate
     budget/         # calendar model-budget window helpers
     sso/            # non-premium SSO user-cap policy
+    license/        # premium_user unlock (guardrails / Enterprise gates)
   ui/               # docs for dashboard mount points (React stays under ui/)
 ```
 
@@ -46,6 +47,7 @@ litellm_bitovi/
 | VK ownership defaults | `key_management_endpoints.py` | `proxy.key_hooks.ownership` |
 | Model budget windows | `hooks/model_max_budget_limiter.py` | `proxy.budget.windows` |
 | SSO 5-user gate | `ui_sso.py`, enterprise `internal_user_endpoints.py` | `proxy.sso.policy` |
+| Premium unlock (guardrails, etc.) | `proxy_server.py` (`premium_user`) | `proxy.license.policy` |
 
 Compatibility shims remain at the old import paths for config teams so gradual migrations do not break.
 
