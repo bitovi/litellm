@@ -53,6 +53,25 @@ Then refresh **My User** to see your `$100` / monthly progress bar.
 
 Config used: `docker/local_ui_verify_config.yaml`. First build is slow; later rebuilds reuse cache. Stop with `make local-down` (or `docker compose -f docker-compose.local.yml down`).
 
+### Headroom prompt compression (local)
+
+`docker-compose.local.yml` starts a Headroom sidecar on `:8787`. The local config registers `headroom-compression` as an opt-in `pre_call` guardrail (not `default_on`).
+
+Verify compression ran (needs a provider key in `docker/local.env`):
+
+```bash
+curl -i http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer sk-1234" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role":"user","content":"FILE a.py:\n```python\n'"$(python3 -c 'print("def f(x):\\n    return x\\n"*80)')"'```"}],
+    "guardrails": ["headroom-compression"]
+  }'
+```
+
+Look for `x-litellm-applied-guardrails: headroom-compression`. Headroom's own dashboard is at http://localhost:8787/dashboard. Bypass with header `x-headroom-bypass: true`.
+
 ## Building and Running the Application
 
 To build and run the application, you will use the `docker-compose.yml` file located in the root of the project. This file is configured to use the `Dockerfile.non_root` for a secure, non-root container environment.

@@ -24,7 +24,7 @@ Then:
 
 The theme / networking "Failed to fetch" error means only the Next.js UI is running without the proxy. Use `make local-up` instead of `npm run dev` alone
 
-Config: `docker/local_ui_verify_config.yaml`. Details: [docker/README.md](docker/README.md)
+Config: `docker/local_ui_verify_config.yaml`. Details: [docker/README.md](docker/README.md). Includes an opt-in Headroom sidecar on `:8787` (`headroom-compression` guardrail)
 
 ## Remotes and branches
 
