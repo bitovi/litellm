@@ -12,7 +12,9 @@ This guide provides instructions for building and running the LiteLLM applicatio
 One command that builds the proxy **from this repo**, with Postgres + Redis, sample config-scoped team budgets, and hot-reload:
 
 ```bash
-docker compose -f docker-compose.local.yml up --build
+cp docker/local.env.example docker/local.env   # optional API keys
+make local-up
+# or: docker compose -f docker-compose.local.yml up --build
 ```
 
 Then:
@@ -21,7 +23,9 @@ Then:
 - **UI hot-reload**: http://localhost:3000 (Next.js HMR; talks to the proxy on :4000)
 - **Teams → Local Demo → Overview** for per-user / per-model budgets, and **My User** for spend progress
 
-Python changes under `./litellm` reload automatically (`--reload` + `PYTHONPATH=/app`). Dashboard source changes are live on :3000. To push a static build into :4000/ui without rebuilding the image, run `npm run build` in `ui/litellm-dashboard` (the `out/` folder is bind-mounted).
+Do not run `npm run dev` alone for the dashboard; without the proxy on :4000 you get browser `Failed to fetch` (theme settings, etc.)
+
+Python changes under `./litellm` and `./bitovi` reload automatically (`--reload` + `PYTHONPATH=/app/bitovi:/app`). Dashboard source changes are live on :3000. To push a static build into :4000/ui without rebuilding the image, run `npm run build` in `ui/litellm-dashboard` (the `out/` folder is bind-mounted).
 
 Usage page deep links (refresh-safe):
 
@@ -47,7 +51,7 @@ curl -X POST http://localhost:4000/team/member_add \
 
 Then refresh **My User** to see your `$100` / monthly progress bar.
 
-Config used: `docker/local_ui_verify_config.yaml`. First build is slow; later rebuilds reuse cache. Stop with `docker compose -f docker-compose.local.yml down`.
+Config used: `docker/local_ui_verify_config.yaml`. First build is slow; later rebuilds reuse cache. Stop with `make local-down` (or `docker compose -f docker-compose.local.yml down`).
 
 ## Building and Running the Application
 

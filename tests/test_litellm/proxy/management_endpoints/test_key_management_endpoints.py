@@ -10329,7 +10329,7 @@ class TestLIT1884KeyGenerateValidation:
             patch("litellm.proxy.proxy_server.user_api_key_cache", MagicMock()),
             patch("litellm.proxy.proxy_server.user_custom_key_generate", None),
             patch(
-                "litellm.proxy.management_endpoints.key_management_endpoints.UserRepository"
+                "litellm_bitovi.proxy.key_hooks.ownership.UserRepository"
             ) as mock_user_repo,
             patch(
                 "litellm.proxy.management_endpoints.key_management_endpoints.get_team_object",
@@ -10375,7 +10375,7 @@ class TestLIT1884KeyGenerateValidation:
             patch("litellm.proxy.proxy_server.user_api_key_cache", MagicMock()),
             patch("litellm.proxy.proxy_server.user_custom_key_generate", None),
             patch(
-                "litellm.proxy.management_endpoints.key_management_endpoints.UserRepository"
+                "litellm_bitovi.proxy.key_hooks.ownership.UserRepository"
             ) as mock_user_repo,
             patch("litellm.key_generation_settings", None),
         ):

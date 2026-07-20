@@ -22,19 +22,29 @@ async def available_enterprise_users(
     """
     For keys with `max_users` set, return the list of users that are allowed to use the key.
     """
-    from litellm.proxy._types import CommonProxyErrors
+    from litellm.proxy._types import CommonProxyErrors, EnterpriseLicenseData
     from litellm.proxy.proxy_server import (
+        premium_user,
         premium_user_data,
         prisma_client,
     )
     from litellm.repositories.team_repository import TeamRepository
     from litellm.repositories.user_repository import UserRepository
+    from litellm_bitovi.proxy.sso.policy import should_enforce_non_premium_sso_user_limit
 
     if prisma_client is None:
         raise HTTPException(
             status_code=500,
             detail={"error": CommonProxyErrors.db_not_connected_error.value},
         )
+
+    if should_enforce_non_premium_sso_user_limit() and not premium_user:
+        from litellm.proxy.auth.auth_utils import _has_user_setup_sso
+
+        if _has_user_setup_sso():
+            premium_user_data = EnterpriseLicenseData(
+                max_users=5,
+            )
 
     user_count = await UserRepository(prisma_client).count_billable_users()
     team_count = await TeamRepository(prisma_client).count()

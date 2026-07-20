@@ -4733,7 +4733,7 @@ class ProxyConfig:
                     run_ollama_serve()
 
         ## DECLARATIVE TEAMS (synced to DB on startup)
-        from litellm.proxy.management_helpers.config_teams_sync import parse_config_teams
+        from litellm_bitovi.proxy.config_teams import parse_config_teams
 
         config_teams = parse_config_teams(config.get("teams"))
         config_teams_model_list = model_list
@@ -7633,7 +7633,7 @@ class ProxyStartupEvent:
         global config_teams, config_teams_model_list, master_key, prisma_client
         if not config_teams:
             return
-        from litellm.proxy.management_helpers.config_teams_sync import sync_config_teams
+        from litellm_bitovi.proxy.config_teams import sync_config_teams
 
         await sync_config_teams(
             config_teams=config_teams,
