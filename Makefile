@@ -247,7 +247,7 @@ test-unit-llms: install-test-deps
 	$(UV_RUN) pytest tests/test_litellm/llms --tb=short -vv -n 4 --durations=20
 
 test-unit-proxy-guardrails: install-test-deps
-	$(UV_RUN) pytest tests/test_litellm/proxy/guardrails tests/test_litellm/proxy/management_endpoints tests/test_litellm/proxy/management_helpers --tb=short -vv -n 4 --durations=20
+	$(UV_RUN) pytest tests/test_litellm/proxy/guardrails tests/test_litellm/proxy/management_endpoints tests/test_litellm/proxy/management_helpers tests/test_litellm/bitovi --tb=short -vv -n 4 --durations=20
 
 test-unit-proxy-core: install-test-deps
 	$(UV_RUN) pytest tests/test_litellm/proxy/auth tests/test_litellm/proxy/client tests/test_litellm/proxy/db tests/test_litellm/proxy/hooks tests/test_litellm/proxy/policy_engine --tb=short -vv -n 4 --durations=20
