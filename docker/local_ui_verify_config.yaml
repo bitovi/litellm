@@ -1,11 +1,19 @@
 # Self-contained config for local UI verification via docker-compose.local.yml
 # Login: username admin, password sk-1234
+#
+# Real completions need OPENAI_API_KEY and/or ANTHROPIC_API_KEY in docker/local.env
+# (or the host environment). UI budget / team flows work without them.
 
 model_list:
   - model_name: gpt-4o-mini
     litellm_params:
       model: openai/gpt-4o-mini
       api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: claude-haiku-4-5
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
 
   - model_name: claude-opus-4-8
     litellm_params:
@@ -22,6 +30,7 @@ teams:
     team_member_budget_duration: 30d
     models:
       - gpt-4o-mini
+      - claude-haiku-4-5
       - claude-opus-4-8
 
 litellm_settings:

@@ -1,8 +1,30 @@
 # Bitovi LiteLLM Fork
 
+**Agents: DO NOT COMMIT OR PUSH** unless the user explicitly asks in the current message. See `AGENTS.md` and `.cursor/rules/no-auto-git.mdc`
+
 Bitovi fork of [BerriAI/litellm](https://github.com/BerriAI/litellm). We keep upstream LiteLLM stable releases while carrying Bitovi-specific features and platform deploy config.
 
 Related ops docs: [DEPLOYMENT.md](DEPLOYMENT.md), [DB_RESET.md](DB_RESET.md). Feature ownership package: [bitovi/litellm_bitovi/README.md](bitovi/litellm_bitovi/README.md)
+
+## Local Docker (recommended for testing)
+
+One command brings up proxy + Admin UI + Postgres + Redis with demo team budgets:
+
+```bash
+# optional: put OPENAI_API_KEY / ANTHROPIC_API_KEY in docker/local.env
+cp docker/local.env.example docker/local.env
+make local-up
+```
+
+Then:
+
+- API + baked UI: http://localhost:4000/ui/ (login `admin` / `sk-1234`)
+- UI hot-reload: http://localhost:3000 (Next.js; calls the proxy on :4000)
+- Stop: `make local-down`
+
+The theme / networking "Failed to fetch" error means only the Next.js UI is running without the proxy. Use `make local-up` instead of `npm run dev` alone
+
+Config: `docker/local_ui_verify_config.yaml`. Details: [docker/README.md](docker/README.md)
 
 ## Remotes and branches
 

@@ -1,15 +1,19 @@
-# Local UI verification with hot-reload (proxy Python + Next.js UI)
+# Local UI + proxy verification with hot-reload (Postgres + Redis)
 #
-#   docker compose -f docker-compose.local.yml up --build
+#   make local-up
+#   # or: docker compose -f docker-compose.local.yml --env-file docker/local.env up --build
 #
 # Proxy API + UI at /ui: http://localhost:4000/ui/
 # UI hot-reload (recommended for dashboard work): http://localhost:3000
 # Login: admin / sk-1234
 # Team Overview: Teams -> Local Demo
 #
-# Python edits under ./litellm reload via --reload (PYTHONPATH prefers /app/litellm).
+# Python edits under ./litellm and ./bitovi reload via --reload
+# (PYTHONPATH prefers /app/bitovi then /app).
 # UI edits: use the `ui` service on :3000 (Next HMR). To refresh :4000/ui,
 # run `npm run build` in ui/litellm-dashboard (out/ is bind-mounted).
+#
+# Optional provider keys: copy docker/local.env.example -> docker/local.env
 
 services:
   litellm:
@@ -21,8 +25,8 @@ services:
       - "4000:4000"
     volumes:
       - ./docker/local_ui_verify_config.yaml:/app/config.yaml:ro
-      # Prefer repo source over the image's site-packages copy (watched by --reload)
       - ./litellm:/app/litellm
+      - ./bitovi:/app/bitovi
       - ./ui/litellm-dashboard/out:/app/litellm/proxy/_experimental/out
       - ./enterprise:/app/enterprise
     command:
@@ -31,12 +35,14 @@ services:
       - "--reload"
     environment:
       LITELLM_MASTER_KEY: sk-1234
+      UI_USERNAME: admin
+      UI_PASSWORD: sk-1234
       DATABASE_URL: postgresql://llmproxy:dbpassword9090@db:5432/litellm
       STORE_MODEL_IN_DB: "True"
-      PYTHONPATH: /app
+      PYTHONPATH: /app/bitovi:/app
       PYTHONDONTWRITEBYTECODE: "1"
-      # Optional: real completions for spend demos. UI budget display works without it.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -61,6 +67,7 @@ services:
       - ui_node_modules:/ui/node_modules
     environment:
       NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_BASE_URL: http://localhost:4000
     command:
       - sh
       - -c
