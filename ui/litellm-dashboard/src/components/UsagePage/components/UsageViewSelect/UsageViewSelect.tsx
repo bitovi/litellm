@@ -22,7 +22,8 @@ export type UsageOption =
   | "tag"
   | "agent"
   | "user"
-  | "user-agent-activity";
+  | "user-agent-activity"
+  | "headroom";
 export interface UsageViewSelectProps {
   value: UsageOption;
   onChange: (value: UsageOption) => void;
@@ -117,6 +118,13 @@ const OPTIONS: OptionConfig[] = [
     label: "User Agent Activity",
     description: "View detailed user agent activity logs",
     icon: <LineChartOutlined style={{ fontSize: "16px" }} />,
+    adminOnly: true,
+  },
+  {
+    value: "headroom",
+    label: "Headroom Savings",
+    description: "Tokens saved by the Headroom compression guardrail",
+    icon: <BarChartOutlined style={{ fontSize: "16px" }} />,
     adminOnly: true,
   },
 ];

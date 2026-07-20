@@ -57,13 +57,15 @@ bitovi/litellm_bitovi/  + owned UI folders  (edit freely; rarely conflict)
 
 **Rename storms** (upstream moves a page tree) still hurt once; wrappers do not fix renames. They stop you from re-solving the same VK/budget hunks every tag.
 
-### Where new code goes
+### Where new code goes (agents: default here)
 
-1. Prefer `bitovi/litellm_bitovi/...` for proxy/auth/budget/SSO logic
+**Assume new Bitovi work belongs in `bitovi/litellm_bitovi/` first.** Treat edits to `proxy_server.py` and other shared LiteLLM modules as a last resort (thin call-out only)
+
+1. Prefer `bitovi/litellm_bitovi/...` for proxy/auth/budget/SSO/observability logic
 2. Prefer `ui/litellm-dashboard/src/components/bitovi/` or existing owned UI folders for dashboard panels
-3. Wire with config hooks (`custom_key_generate`, `callbacks`, …) or a **short** call-out in an upstream file
+3. Wire with config hooks (`custom_key_generate`, `callbacks`, …) or a **short** call-out / `include_router` in an upstream file
 4. Tests under `tests/test_litellm/bitovi/`
-5. Only expand a shared upstream file when a seam is impossible; document why in the PR
+5. Only expand a shared upstream file when a seam is impossible; document why in the PR and update the seam table below
 
 ### Owned paths (low conflict)
 
@@ -75,6 +77,7 @@ bitovi/litellm_bitovi/  + owned UI folders  (edit freely; rarely conflict)
 | Model budget windows | `bitovi/litellm_bitovi/proxy/budget/` |
 | SSO user-cap policy | `bitovi/litellm_bitovi/proxy/sso/` |
 | Premium / guardrails unlock | `bitovi/litellm_bitovi/proxy/license/` |
+| Headroom savings observability | `bitovi/litellm_bitovi/proxy/headroom/` |
 | Usage / my-budgets UI | `ui/litellm-dashboard/src/components/UsagePage/**` |
 | Per-model budget UI | `ui/.../key_team_helpers/ModelMaxBudget*` |
 | Platform deploy | `deploy/values.yaml`, `.github/workflows/publish-*.yml` |
@@ -91,7 +94,11 @@ bitovi/litellm_bitovi/  + owned UI folders  (edit freely; rarely conflict)
 | Budget window helpers | `hooks/model_max_budget_limiter.py` | `litellm_bitovi.proxy.budget` |
 | SSO 5-user gate | `ui_sso.py`, enterprise `internal_user_endpoints.py` | `litellm_bitovi.proxy.sso.policy` |
 | Premium unlock | `proxy_server.py` (`premium_user`) | `litellm_bitovi.proxy.license.policy` |
+| Headroom savings API mount | `proxy_server.py` (`include_router`) | `litellm_bitovi.proxy.headroom.endpoints` |
+| Headroom savings record | `guardrail_hooks/headroom/headroom.py` (one call) | `litellm_bitovi.proxy.headroom.savings` |
 | Redis datetime JSON | `redis_cache.py`, `cache_pydantic_utils.py` | keep tiny; prefer upstream PR |
+
+`proxy_server.py` note: the bottom `app.include_router(...)` block churns whenever upstream adds a router. Bitovi lines there should stay **import + include only**. On sync conflicts in that block, keep **both** sides' router lines (upstream routers + Bitovi `bitovi_headroom_router` / any future Bitovi routers)
 
 ### Upstream PR candidates vs keep-fork-local
 
@@ -140,6 +147,7 @@ Do not merge while GitHub shows **This branch has conflicts that must be resolve
 | `bitovi/**` | Bitovi |
 | `litellm/llms/bedrock_mantle/**` | Bitovi (SigV4 contract) |
 | `litellm/proxy/auth/**`, key/team/budget call-outs | Bitovi when both changed; read both sides |
+| `litellm/proxy/proxy_server.py` (`include_router` / premium / config_teams seams) | Keep both router lines; keep Bitovi call-outs; prefer upstream for unrelated hunks |
 | `tests/test_litellm/bitovi/**`, `tests/e2e/quota_management/budgets/**` | Bitovi |
 | `ui/**/UsagePage/**`, `ui/**/bitovi/**`, `ModelMaxBudget*` | Bitovi |
 | `deploy/**`, Bitovi `.github/workflows/publish-*.yml`, `test.yml`, `fork-compatibility-check.yml` | Bitovi |

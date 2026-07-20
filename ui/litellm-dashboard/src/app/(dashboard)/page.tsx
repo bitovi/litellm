@@ -41,12 +41,17 @@ function CreateKeyPageContent() {
   }, [redirectToLogin]);
 
   // Redirect legacy ?page= deep links (old bookmarks) to their path-based routes.
+  // Preserve other query params (e.g. view=headroom on Usage) so deep links keep working.
   const isLegacyRedirect = explicitPage !== null && explicitPage in MIGRATED_PAGES;
   useEffect(() => {
-    if (!authLoading && isLegacyRedirect) {
-      router.replace(migratedHref(MIGRATED_PAGES[explicitPage]));
+    if (!authLoading && isLegacyRedirect && explicitPage !== null) {
+      const retained = new URLSearchParams(searchParams.toString());
+      retained.delete("page");
+      const qs = retained.toString();
+      const dest = migratedHref(MIGRATED_PAGES[explicitPage]);
+      router.replace(qs ? `${dest}?${qs}` : dest);
     }
-  }, [authLoading, isLegacyRedirect, explicitPage, router]);
+  }, [authLoading, isLegacyRedirect, explicitPage, router, searchParams]);
 
   // Check for a stored return URL after successful authentication
   // This handles the case where user comes back from SSO and we need to redirect to the original URL
