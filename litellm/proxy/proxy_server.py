@@ -16018,6 +16018,10 @@ app.include_router(ui_sso_router)
 app.include_router(organization_router)
 app.include_router(customer_router)
 app.include_router(spend_management_router)
+# Bitovi: Headroom compression savings aggregates (non-redacted token stats)
+from litellm_bitovi.proxy.headroom.endpoints import router as bitovi_headroom_router
+
+app.include_router(bitovi_headroom_router)
 app.include_router(caching_router)
 app.include_router(analytics_router)
 app.include_router(callback_management_endpoints_router)

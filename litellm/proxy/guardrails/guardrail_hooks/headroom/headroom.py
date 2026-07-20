@@ -92,6 +92,72 @@ def _build_headroom_retrieve_tool() -> dict[str, object]:
     }
 
 
+def _build_anthropic_headroom_retrieve_tool() -> dict[str, object]:
+    return {
+        "type": "custom",
+        "name": HEADROOM_RETRIEVE_TOOL_NAME,
+        "description": (
+            "Retrieve original content that was compressed by Headroom. "
+            "Call this when you encounter a compression marker containing a hash."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "hash": {
+                    "type": "string",
+                    "description": "The 24-character hex hash from the compression marker.",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Optional search query for BM25-ranked retrieval.",
+                },
+            },
+            "required": ["hash"],
+        },
+    }
+
+
+def _tools_look_anthropic(tools: list[object]) -> bool:
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        if tool.get("type") == "custom" or ("input_schema" in tool and "function" not in tool):
+            return True
+        if tool.get("type") == "function" or isinstance(tool.get("function"), dict):
+            return False
+    return False
+
+
+def _inject_headroom_retrieve_into_request_tools(request_data: dict) -> None:
+    """Append headroom_retrieve onto the request tool list without replacing it.
+
+    Guardrail translation writeback replaces ``data["tools"]`` with whatever
+    ``apply_guardrail`` returns. If Headroom returns only ``[headroom_retrieve]``
+    (because ``inputs.tools`` was missing), the caller's tools are wiped. Inject
+    onto ``request_data["tools"]`` instead when we cannot safely merge.
+    """
+    tools = request_data.get("tools")
+    if not isinstance(tools, list):
+        return
+    if has_headroom_retrieve_tool(tools):
+        return
+    if _tools_look_anthropic(tools):
+        tools.append(_build_anthropic_headroom_retrieve_tool())
+    else:
+        tools.append(_build_headroom_retrieve_tool())
+
+
+def _merge_headroom_retrieve_tools(existing_tools: list[object]) -> list[object]:
+    if has_headroom_retrieve_tool(existing_tools):
+        return list(existing_tools)
+    retrieve = (
+        _build_anthropic_headroom_retrieve_tool()
+        if _tools_look_anthropic(existing_tools)
+        else _build_headroom_retrieve_tool()
+    )
+    return list(existing_tools) + [retrieve]
+
+
 def _resolve_call_id(logging_obj: object, request_state: dict[str, object]) -> Optional[str]:
     """Resolve the litellm_call_id shared by a request's pre-call hook and its
     agentic-loop hooks, so CCR hash validation can be scoped per call instead
@@ -492,6 +558,10 @@ class HeadroomGuardrail(CustomGuardrail):
             end_time=end_time,
             duration=end_time - start_time,
         )
+        # Bitovi: persist numeric savings outside redacted guardrail_response
+        from litellm_bitovi.proxy.headroom.savings import record_compression_stats
+
+        record_compression_stats(request_data, stats, logging_obj=logging_obj)
 
         hashes = extract_hashes_from_messages(compressed)
         if not hashes:
@@ -505,15 +575,16 @@ class HeadroomGuardrail(CustomGuardrail):
         self._issued_hashes_by_call_id[call_id] = (frozenset(hashes), time.monotonic() + _HASH_CACHE_TTL_SECONDS)
 
         existing_tools = inputs.get("tools")
-        retrieve_tool = _build_headroom_retrieve_tool()
-        if isinstance(existing_tools, list) and not has_headroom_retrieve_tool(existing_tools):
-            merged_tools: list[object] = list(existing_tools) + [retrieve_tool]
-        elif existing_tools is None:
-            merged_tools = [retrieve_tool]
-        else:
-            merged_tools = list(existing_tools) if isinstance(existing_tools, list) else [retrieve_tool]
+        # Only return a tools list when we can merge onto the tools that were
+        # passed into apply_guardrail. Returning [headroom_retrieve] alone
+        # makes Anthropic/OpenAI guardrail writeback replace the caller's
+        # entire toolset (e.g. web_search disappears).
+        if isinstance(existing_tools, list) and len(existing_tools) > 0:
+            merged_tools = _merge_headroom_retrieve_tools(existing_tools)
+            return {**inputs, "structured_messages": compressed, "tools": merged_tools}  # pyright: ignore[reportReturnType]
 
-        return {**inputs, "structured_messages": compressed, "tools": merged_tools}  # pyright: ignore[reportReturnType]
+        _inject_headroom_retrieve_into_request_tools(request_data)
+        return {**inputs, "structured_messages": compressed}  # pyright: ignore[reportReturnType]
 
     async def async_should_run_agentic_loop(
         self,

@@ -148,6 +148,13 @@ async def test_apply_guardrail_injects_retrieve_tool_when_hashes_present(
         structured_messages=ORIGINAL_MESSAGES,
     )
     mock_response = _make_compress_response(COMPRESSED_MESSAGES_WITH_HASH)
+    # Caller already has tools on the request (Anthropic / agent path). Headroom
+    # must not return tools=[headroom_retrieve] alone — that writeback wipes
+    # the caller's toolset. Inject onto request_data["tools"] instead.
+    request_data: dict = {
+        "model": "gpt-4o",
+        "tools": [{"type": "function", "function": {"name": "web_search", "parameters": {}}}],
+    }
 
     with patch.object(
         guardrail.async_handler,
@@ -157,13 +164,50 @@ async def test_apply_guardrail_injects_retrieve_tool_when_hashes_present(
     ):
         result = await guardrail.apply_guardrail(
             inputs=inputs,
-            request_data={"model": "gpt-4o"},
+            request_data=request_data,
             input_type="request",
         )
 
-    tools = result.get("tools")
-    assert tools is not None
-    assert has_headroom_retrieve_tool(tools)
+    assert "tools" not in result or result.get("tools") is None
+    assert has_headroom_retrieve_tool(request_data["tools"])
+    assert any(
+        isinstance(t, dict) and t.get("function", {}).get("name") == "web_search" for t in request_data["tools"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_apply_guardrail_does_not_replace_tools_when_inputs_tools_missing(
+    guardrail: HeadroomGuardrail,
+):
+    """Regression: returning only headroom_retrieve caused agents to lose web_search."""
+    inputs = GenericGuardrailAPIInputs(
+        texts=["A" * 5000],
+        structured_messages=ORIGINAL_MESSAGES,
+    )
+    mock_response = _make_compress_response(COMPRESSED_MESSAGES_WITH_HASH)
+    request_data: dict = {
+        "model": "claude-haiku-4-5",
+        "tools": [
+            {"type": "custom", "name": "web_search", "input_schema": {"type": "object", "properties": {}}},
+        ],
+    }
+
+    with patch.object(
+        guardrail.async_handler,
+        "post",
+        new_callable=AsyncMock,
+        return_value=mock_response,
+    ):
+        result = await guardrail.apply_guardrail(
+            inputs=inputs,
+            request_data=request_data,
+            input_type="request",
+        )
+
+    assert result.get("tools") is None
+    names = [t.get("name") for t in request_data["tools"] if isinstance(t, dict)]
+    assert "web_search" in names
+    assert HEADROOM_RETRIEVE_TOOL_NAME in names
 
 
 @pytest.mark.asyncio

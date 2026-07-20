@@ -1,10 +1,11 @@
 # Bitovi LiteLLM extensions (`litellm_bitovi`)
 
-Owned package for Bitovi fork behavior. Prefer adding features here instead of
-editing upstream-shared LiteLLM files. That keeps weekly stable-tag syncs
-cheaper and makes ownership obvious for new maintainers.
+Owned package for Bitovi fork behavior. **Agents and humans: default here.** Prefer
+adding features in this package instead of editing upstream-shared LiteLLM files.
+That keeps weekly stable-tag syncs cheaper and makes ownership obvious for new
+maintainers.
 
-Root guide: [`FORK.md`](../../FORK.md)
+Root guide: [`FORK.md`](../../FORK.md). Cursor rule: `.cursor/rules/litellm-bitovi-thin-layer.mdc`
 
 ## Layout
 
@@ -16,6 +17,7 @@ litellm_bitovi/
     budget/         # calendar model-budget window helpers
     sso/            # non-premium SSO user-cap policy
     license/        # premium_user unlock (guardrails / Enterprise gates)
+    headroom/       # compression savings metadata + aggregate API
   ui/               # docs for dashboard mount points (React stays under ui/)
 ```
 
@@ -48,6 +50,8 @@ litellm_bitovi/
 | Model budget windows | `hooks/model_max_budget_limiter.py` | `proxy.budget.windows` |
 | SSO 5-user gate | `ui_sso.py`, enterprise `internal_user_endpoints.py` | `proxy.sso.policy` |
 | Premium unlock (guardrails, etc.) | `proxy_server.py` (`premium_user`) | `proxy.license.policy` |
+| Headroom savings API | `proxy_server.py` (`include_router` only) | `proxy.headroom.endpoints` |
+| Headroom savings record | `headroom.py` one-line call + spend metadata field | `proxy.headroom.savings` |
 
 Compatibility shims remain at the old import paths for config teams so gradual migrations do not break.
 
@@ -59,5 +63,6 @@ Dashboard React code stays under `ui/litellm-dashboard/`. Bitovi-owned panels:
 - `src/components/key_team_helpers/ModelMaxBudget*`
 - `src/components/team/MyUserTab.tsx`
 - Prefer new work under `src/components/bitovi/`
+- Headroom: `HeadroomCompressionPanel` (Logs) + `HeadroomSavingsView` (Usage → Headroom Savings)
 
 Do not grow features inside upstream-colocated trees under `app/(dashboard)/usage/_components/` (stale duplicate from upstream colocation).

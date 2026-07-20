@@ -53,6 +53,7 @@ import TopKeyView from "./EntityUsage/TopKeyView";
 import MyBudgetsUsageView from "./MyBudgetsUsageView";
 import UsageAIChatPanel from "./UsageAIChatPanel";
 import { UsageOption, UsageViewSelect } from "./UsageViewSelect/UsageViewSelect";
+import { HeadroomSavingsView } from "@/components/bitovi/HeadroomSavingsView";
 
 interface UsagePageProps {
   teams: Team[];
@@ -911,6 +912,15 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
               teams={teams ?? []}
               selectedTeamId={budgetTeamId}
               onTeamChange={handleBudgetTeamChange}
+            />
+          )}
+
+          {/* Bitovi: Headroom compression savings */}
+          {usageView === "headroom" && dateValue.from && dateValue.to && (
+            <HeadroomSavingsView
+              accessToken={accessToken}
+              startDate={dateValue.from.toISOString().slice(0, 10)}
+              endDate={dateValue.to.toISOString().slice(0, 10)}
             />
           )}
 

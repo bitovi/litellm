@@ -339,7 +339,27 @@ class AnthropicMessagesHandler(BaseTranslation):
                     if converted_tool is not None:
                         anthropic_tools.append(converted_tool)
                     # Note: MCP servers are handled separately in the main transformation
-                data["tools"] = anthropic_tools
+                original_tools = data.get("tools")
+                # If remapping dropped tools (common when a guardrail injects an
+                # OpenAI-shaped tool the mapper does not reverse for every
+                # original tool), keep the request toolset and only append new
+                # tools from the guardrail by name.
+                if isinstance(original_tools, list) and original_tools and len(anthropic_tools) < len(original_tools):
+                    existing_names: set[str] = set()
+                    for ot in original_tools:
+                        if isinstance(ot, dict):
+                            name = ot.get("name")
+                            if isinstance(name, str) and name:
+                                existing_names.add(name)
+                    merged_tools: List[AllAnthropicToolsValues] = list(original_tools)  # type: ignore[arg-type]
+                    for ct in anthropic_tools:
+                        name = ct.get("name") if isinstance(ct, dict) else None
+                        if isinstance(name, str) and name and name not in existing_names:
+                            merged_tools.append(ct)
+                            existing_names.add(name)
+                    data["tools"] = merged_tools
+                else:
+                    data["tools"] = anthropic_tools
 
             guardrailed_structured_messages = guardrailed_inputs.get("structured_messages")
             if (

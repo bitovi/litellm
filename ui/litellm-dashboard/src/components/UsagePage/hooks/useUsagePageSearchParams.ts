@@ -18,6 +18,7 @@ export const USAGE_OPTIONS: readonly UsageOption[] = [
   "agent",
   "user",
   "user-agent-activity",
+  "headroom",
 ] as const;
 
 const USAGE_OPTION_SET: ReadonlySet<string> = new Set(USAGE_OPTIONS);
