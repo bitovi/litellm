@@ -639,7 +639,16 @@ except ImportError:
 
 server_root_path = get_server_root_path()
 _license_check = LicenseCheck()
-premium_user: bool = _license_check.is_premium()
+
+
+def _resolve_premium_user(license_says_premium: bool) -> bool:
+    # Bitovi: unlock Enterprise-gated features (guardrails, etc.) without LITELLM_LICENSE.
+    from litellm_bitovi.proxy.license.policy import resolve_premium_user
+
+    return resolve_premium_user(license_says_premium)
+
+
+premium_user: bool = _resolve_premium_user(_license_check.is_premium())
 premium_user_data: Optional["EnterpriseLicenseData"] = _license_check.airgapped_license_data
 global_max_parallel_request_retries_env: Optional[str] = os.getenv("LITELLM_GLOBAL_MAX_PARALLEL_REQUEST_RETRIES")
 proxy_state = ProxyState()
@@ -870,7 +879,7 @@ async def proxy_startup_event(app: FastAPI):
         "litellm.proxy.proxy_server.py::startup() - CHECKING PREMIUM USER - {}".format(premium_user)
     )
     if premium_user is False:
-        premium_user = _license_check.is_premium()
+        premium_user = _resolve_premium_user(_license_check.is_premium())
 
     ## CHECK MASTER KEY IN ENVIRONMENT ##
     master_key = get_secret_str("LITELLM_MASTER_KEY")
@@ -4144,7 +4153,7 @@ class ProxyConfig:
             # check if litellm_license in general_settings
             if "LITELLM_LICENSE" in environment_variables:
                 _license_check.license_str = os.getenv("LITELLM_LICENSE", None)
-                premium_user = _license_check.is_premium()
+                premium_user = _resolve_premium_user(_license_check.is_premium())
         return
 
     async def load_config(self, router: Optional[litellm.Router], config_file_path: str):
@@ -4702,7 +4711,7 @@ class ProxyConfig:
             # check if litellm_license in general_settings
             if "litellm_license" in general_settings:
                 _license_check.license_str = general_settings["litellm_license"]
-                premium_user = _license_check.is_premium()
+                premium_user = _resolve_premium_user(_license_check.is_premium())
 
         router_params: dict = {
             "cache_responses": litellm.cache is not None,  # cache if user passed in cache values

@@ -24,7 +24,7 @@ Then:
 
 The theme / networking "Failed to fetch" error means only the Next.js UI is running without the proxy. Use `make local-up` instead of `npm run dev` alone
 
-Config: `docker/local_ui_verify_config.yaml`. Details: [docker/README.md](docker/README.md)
+Config: `docker/local_ui_verify_config.yaml`. Details: [docker/README.md](docker/README.md). Includes an opt-in Headroom sidecar on `:8787` (`headroom-compression` guardrail)
 
 ## Remotes and branches
 
@@ -74,6 +74,7 @@ bitovi/litellm_bitovi/  + owned UI folders  (edit freely; rarely conflict)
 | VK ownership defaults | `bitovi/litellm_bitovi/proxy/key_hooks/` |
 | Model budget windows | `bitovi/litellm_bitovi/proxy/budget/` |
 | SSO user-cap policy | `bitovi/litellm_bitovi/proxy/sso/` |
+| Premium / guardrails unlock | `bitovi/litellm_bitovi/proxy/license/` |
 | Usage / my-budgets UI | `ui/litellm-dashboard/src/components/UsagePage/**` |
 | Per-model budget UI | `ui/.../key_team_helpers/ModelMaxBudget*` |
 | Platform deploy | `deploy/values.yaml`, `.github/workflows/publish-*.yml` |
@@ -89,6 +90,7 @@ bitovi/litellm_bitovi/  + owned UI folders  (edit freely; rarely conflict)
 | VK auto-assign | `key_management_endpoints.py` | `litellm_bitovi.proxy.key_hooks` |
 | Budget window helpers | `hooks/model_max_budget_limiter.py` | `litellm_bitovi.proxy.budget` |
 | SSO 5-user gate | `ui_sso.py`, enterprise `internal_user_endpoints.py` | `litellm_bitovi.proxy.sso.policy` |
+| Premium unlock | `proxy_server.py` (`premium_user`) | `litellm_bitovi.proxy.license.policy` |
 | Redis datetime JSON | `redis_cache.py`, `cache_pydantic_utils.py` | keep tiny; prefer upstream PR |
 
 ### Upstream PR candidates vs keep-fork-local

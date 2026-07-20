@@ -52,3 +52,14 @@ general_settings:
   store_model_in_db: true
   ui_access_mode: all
   default_team_disabled: true
+
+# Opt-in prompt compression (Headroom sidecar in docker-compose.local.yml).
+# Per request: "guardrails": ["headroom-compression"]
+# Per key: POST /key/generate with "guardrails": ["headroom-compression"]
+guardrails:
+  - guardrail_name: headroom-compression
+    litellm_params:
+      guardrail: headroom
+      mode: pre_call
+      api_base: http://headroom:8787
+      unreachable_fallback: fail_open

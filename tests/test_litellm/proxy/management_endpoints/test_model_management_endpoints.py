@@ -2935,10 +2935,18 @@ class TestGetModelInfoWithIdBlocked:
     def test_get_model_info_with_id_propagates_blocked_true(self):
         from litellm.proxy.proxy_server import ProxyConfig
 
-        model = MagicMock()
+        # Bitovi unlocks premium_user; the enterprise branch copies created_*/updated_*
+        # into ModelInfo. Spec the mock so getattr does not invent MagicMock attrs.
+        model = MagicMock(
+            spec=["model_id", "model_info", "blocked", "created_at", "updated_at", "created_by", "updated_by"]
+        )
         model.model_id = "dep-1"
         model.model_info = {}
         model.blocked = True
+        model.created_at = None
+        model.updated_at = None
+        model.created_by = None
+        model.updated_by = None
         info = ProxyConfig().get_model_info_with_id(model=model, db_model=True)
         assert info.id == "dep-1"
         assert getattr(info, "blocked") is True
@@ -2946,9 +2954,15 @@ class TestGetModelInfoWithIdBlocked:
     def test_get_model_info_with_id_defaults_blocked_to_false_when_missing(self):
         from litellm.proxy.proxy_server import ProxyConfig
 
-        model = MagicMock(spec=["model_id", "model_info"])
+        model = MagicMock(
+            spec=["model_id", "model_info", "created_at", "updated_at", "created_by", "updated_by"]
+        )
         model.model_id = "dep-2"
         model.model_info = {}
+        model.created_at = None
+        model.updated_at = None
+        model.created_by = None
+        model.updated_by = None
         info = ProxyConfig().get_model_info_with_id(model=model, db_model=True)
         assert getattr(info, "blocked") is False
 

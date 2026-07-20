@@ -14,6 +14,9 @@
 # run `npm run build` in ui/litellm-dashboard (out/ is bind-mounted).
 #
 # Optional provider keys: copy docker/local.env.example -> docker/local.env
+#
+# Headroom (prompt compression guardrail): http://localhost:8787/dashboard
+# Opt in per request with "guardrails": ["headroom-compression"] or attach to a virtual key.
 
 services:
   litellm:
@@ -43,11 +46,14 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      HEADROOM_API_BASE: http://headroom:8787
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_started
+      headroom:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD-SHELL
@@ -56,6 +62,24 @@ services:
       timeout: 10s
       retries: 5
       start_period: 90s
+
+  headroom:
+    image: ghcr.io/chopratejas/headroom:0.6.7-code-nonroot@sha256:2b227f950c566ecd23df5e30c8c685b381459554c33eff8f9883661582d5d461
+    ports:
+      - "8787:8787"
+    environment:
+      HEADROOM_TELEMETRY: "off"
+      HEADROOM_COMPRESS_USER_MESSAGES: "1"
+      HEADROOM_HOST: "0.0.0.0"
+      HEADROOM_PORT: "8787"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
   ui:
     image: node:20.18-alpine3.20@sha256:3488b10bf958af7125a176419d2d8a9937d895bf124012aae811651988d2ffe6
