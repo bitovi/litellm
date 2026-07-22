@@ -107,6 +107,18 @@ describe("UsageViewSelect", () => {
     expect(screen.getByRole("option", { name: "My Budgets" })).toBeInTheDocument();
   });
 
+  it("should hide Key Cycle Budgets for non-admin users", () => {
+    render(<UsageViewSelect value="global" onChange={mockOnChange} isAdmin={false} />);
+
+    expect(screen.queryByRole("option", { name: "Key Cycle Budgets" })).not.toBeInTheDocument();
+  });
+
+  it("should show Key Cycle Budgets for admin users", () => {
+    render(<UsageViewSelect value="global" onChange={mockOnChange} isAdmin={true} />);
+
+    expect(screen.getByRole("option", { name: "Key Cycle Budgets" })).toBeInTheDocument();
+  });
+
   it("should call onChange when value changes", () => {
     render(<UsageViewSelect value="global" onChange={mockOnChange} isAdmin={true} />);
 

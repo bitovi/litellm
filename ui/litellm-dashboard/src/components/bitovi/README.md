@@ -11,3 +11,11 @@ Headroom savings:
 
 - `HeadroomCompressionPanel.tsx` — mounted from Logs `LogDetailContent`
 - `HeadroomSavingsView.tsx` — mounted from Usage view `headroom`
+
+Key cycle budgets:
+
+- `KeyCycleBudgetsView.tsx` — mounted from Usage view `key-budgets`
+
+Member budget policy (config teams):
+
+- `MemberBudgetPolicyForm.tsx` — mounted from Team edit-member modal when `is_from_config`

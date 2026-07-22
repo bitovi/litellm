@@ -54,6 +54,7 @@ import MyBudgetsUsageView from "./MyBudgetsUsageView";
 import UsageAIChatPanel from "./UsageAIChatPanel";
 import { UsageOption, UsageViewSelect } from "./UsageViewSelect/UsageViewSelect";
 import { HeadroomSavingsView } from "@/components/bitovi/HeadroomSavingsView";
+import { KeyCycleBudgetsView } from "@/components/bitovi/KeyCycleBudgetsView";
 
 interface UsagePageProps {
   teams: Team[];
@@ -913,6 +914,11 @@ const UsagePage: React.FC<UsagePageProps> = ({ teams, organizations }) => {
               selectedTeamId={budgetTeamId}
               onTeamChange={handleBudgetTeamChange}
             />
+          )}
+
+          {/* Bitovi: per-key current budget cycle (spend / max / %) — admins only */}
+          {usageView === "key-budgets" && isAdmin && (
+            <KeyCycleBudgetsView accessToken={accessToken} teams={teams ?? []} />
           )}
 
           {/* Bitovi: Headroom compression savings */}

@@ -3493,6 +3493,24 @@ async def _virtual_key_max_budget_check(
         Triggers a budget alert if the token is over it's max budget.
 
     """
+    # Bitovi: keys marked inherits_team_member_budget live-resolve from team default
+    try:
+        from litellm.proxy.proxy_server import prisma_client, user_api_key_cache
+        from litellm_bitovi.proxy.config_teams import resolve_inheriting_key_max_budget
+
+        live_max = await resolve_inheriting_key_max_budget(
+            valid_token=valid_token,
+            prisma_client=prisma_client,
+            user_api_key_cache=user_api_key_cache,
+        )
+        if live_max is not None:
+            valid_token.max_budget = live_max
+    except Exception:
+        verbose_proxy_logger.debug(
+            "Failed to live-resolve inheriting key max_budget",
+            exc_info=True,
+        )
+
     if valid_token.max_budget is not None:
         from litellm.proxy.proxy_server import get_current_spend
 
@@ -3783,15 +3801,36 @@ async def _check_team_member_budget(
 
         # Per-member override wins; otherwise fall back to the team-level
         # default configured via team.metadata["team_member_budget_id"].
+        # Bitovi: config teams use team default + per-user additive policy.
         team_member_budget: Optional[float] = None
-        if (
+        from litellm_bitovi.proxy.config_teams import (
+            config_team_forces_member_budget_inheritance,
+            resolve_config_team_member_budget,
+        )
+
+        team_metadata = team_object.metadata if isinstance(team_object.metadata, dict) else None
+        force_team_default = config_team_forces_member_budget_inheritance(team_metadata)
+        if force_team_default:
+            effective_budget, _using_default, _breakdown = await resolve_config_team_member_budget(
+                team_metadata=team_metadata,
+                prisma_client=prisma_client,
+                user_api_key_cache=user_api_key_cache,
+                membership=team_membership,
+            )
+            if (
+                effective_budget is not None
+                and effective_budget.max_budget is not None
+                and effective_budget.max_budget > 0
+            ):
+                team_member_budget = effective_budget.max_budget
+        elif (
             team_membership is not None
             and team_membership.litellm_budget_table is not None
             and team_membership.litellm_budget_table.max_budget is not None
         ):
             team_member_budget = team_membership.litellm_budget_table.max_budget
         else:
-            default_budget_id = (team_object.metadata or {}).get("team_member_budget_id")
+            default_budget_id = (team_metadata or {}).get("team_member_budget_id")
             if isinstance(default_budget_id, str):
                 default_budget = await get_team_member_default_budget(
                     budget_id=default_budget_id,

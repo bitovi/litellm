@@ -135,6 +135,24 @@ export default function MyUserTab({ teamId }: MyUserTabProps) {
                   <Tag>Team default</Tag>
                 </div>
               )}
+              {data.bitovi_budget_breakdown &&
+                ((data.bitovi_budget_breakdown.recurring_additive ?? 0) > 0 ||
+                  data.bitovi_budget_breakdown.temp_active ||
+                  data.bitovi_budget_breakdown.using_team_default_base === false) && (
+                  <div style={{ marginTop: 8 }}>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      Base $
+                      {formatNumber(data.bitovi_budget_breakdown.base, 2)}
+                      {(data.bitovi_budget_breakdown.recurring_additive ?? 0) > 0
+                        ? ` + recurring $${formatNumber(data.bitovi_budget_breakdown.recurring_additive, 2)}`
+                        : ""}
+                      {data.bitovi_budget_breakdown.temp_active &&
+                      (data.bitovi_budget_breakdown.temp_additive ?? 0) > 0
+                        ? ` + temp $${formatNumber(data.bitovi_budget_breakdown.temp_additive, 2)}`
+                        : ""}
+                    </Typography.Text>
+                  </div>
+                )}
             </div>
             {percentUsed !== null && (
               <div style={{ marginTop: 12 }}>

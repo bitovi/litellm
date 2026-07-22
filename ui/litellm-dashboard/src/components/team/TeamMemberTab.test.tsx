@@ -69,6 +69,7 @@ const createMockTeamData = (overrides: Partial<TeamData> = {}): TeamData => ({
       team_id: "team-123",
       budget_id: "budget1",
       spend: 100.5,
+      total_spend: 100.5,
       litellm_budget_table: {
         budget_id: "budget1",
         soft_budget: null,
@@ -78,6 +79,7 @@ const createMockTeamData = (overrides: Partial<TeamData> = {}): TeamData => ({
         rpm_limit: 100,
         model_max_budget: null,
         budget_duration: null,
+        budget_reset_at: null,
       },
     },
   ],
@@ -248,6 +250,57 @@ describe("TeamMembersComponent", () => {
     expect(screen.getByText(/10\.1% used/)).toBeInTheDocument();
     expect(screen.getByText(/100 RPM/)).toBeInTheDocument();
     expect(screen.getByText(/10000 TPM/)).toBeInTheDocument();
+  });
+
+  it("should show effective member budget including temp boost", () => {
+    renderWithProviders(
+      <TeamMembersComponent
+        teamData={createMockTeamData({
+          team_info: {
+            ...createMockTeamData().team_info,
+            team_member_budget_table: {
+              max_budget: 100,
+              budget_duration: "30d",
+              tpm_limit: null,
+              rpm_limit: null,
+            },
+          },
+          team_memberships: [
+            {
+              user_id: "user1@test.com",
+              team_id: "team-123",
+              budget_id: "budget1",
+              spend: 0,
+              total_spend: 0,
+              metadata: {
+                bitovi_budget_policy: {
+                  temp_additive: 50,
+                },
+              },
+              litellm_budget_table: {
+                budget_id: "budget1",
+                soft_budget: null,
+                max_budget: 100,
+                max_parallel_requests: null,
+                tpm_limit: null,
+                rpm_limit: null,
+                model_max_budget: null,
+                budget_duration: "30d",
+                budget_reset_at: null,
+              },
+            },
+          ],
+        })}
+        canEditTeam={false}
+        handleMemberDelete={mockHandleMemberDelete}
+        setSelectedEditMember={mockSetSelectedEditMember}
+        setIsEditMemberModalVisible={mockSetIsEditMemberModalVisible}
+        setIsAddMemberModalVisible={mockSetIsAddMemberModalVisible}
+      />,
+    );
+
+    expect(screen.getByText(/of \$150/)).toBeInTheDocument();
+    expect(screen.getByText(/\+\$50 temp/)).toBeInTheDocument();
   });
 
   it("should display No Limit for budget when member has no budget", () => {

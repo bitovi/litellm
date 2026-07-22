@@ -57,6 +57,7 @@ import SearchToolSelector from "../search_tools/SearchToolSelector";
 import EditLoggingSettings from "./EditLoggingSettings";
 import RouterSettingsAccordion, { RouterSettingsAccordionRef } from "../common_components/RouterSettingsAccordion";
 import MemberModal from "./EditMembership";
+import MemberBudgetPolicyForm from "../bitovi/MemberBudgetPolicyForm";
 import { ModelMaxBudgetEditor } from "../key_team_helpers/ModelMaxBudgetEditor";
 import { ModelMaxBudgetOverview } from "../key_team_helpers/ModelMaxBudgetOverview";
 import MemberPermissions from "./member_permissions";
@@ -76,6 +77,7 @@ export interface TeamMembership {
   budget_id: string;
   spend: number;
   total_spend: number | null;
+  metadata?: Record<string, unknown> | null;
   litellm_budget_table: {
     budget_id: string;
     soft_budget: number | null;
@@ -1766,6 +1768,26 @@ const TeamInfoView: React.FC<TeamInfoProps> = ({
         onSubmit={handleMemberUpdate}
         initialData={selectedEditMember}
         mode="edit"
+        extraContent={
+          isFromConfig && accessToken && selectedEditMember?.user_id ? (
+            <div className="mb-4 pt-4 border-t border-gray-200">
+              <MemberBudgetPolicyForm
+                accessToken={accessToken}
+                teamId={teamId}
+                userId={selectedEditMember.user_id}
+                onSaved={async () => {
+                  try {
+                    const updatedTeamData = await teamInfoCall(accessToken, teamId);
+                    setTeamData(updatedTeamData);
+                    onUpdate(updatedTeamData);
+                  } catch (error) {
+                    console.error("Error refreshing team after budget policy save:", error);
+                  }
+                }}
+              />
+            </div>
+          ) : null
+        }
         config={{
           title: "Edit Member",
           showEmail: true,

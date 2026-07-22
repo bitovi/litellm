@@ -97,6 +97,7 @@ vi.mock("./UsageViewSelect/UsageViewSelect", async () => {
       },
       React.createElement("option", { value: "global" }, "Global Usage"),
       React.createElement("option", { value: "my-budgets" }, "My Budgets"),
+      React.createElement("option", { value: "key-budgets" }, "Key Cycle Budgets"),
       React.createElement("option", { value: "team" }, "Team Usage"),
       React.createElement("option", { value: "organization" }, "Organization Usage"),
       React.createElement("option", { value: "customer" }, "Customer Usage"),

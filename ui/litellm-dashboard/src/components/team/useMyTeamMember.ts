@@ -12,6 +12,15 @@ export interface TeamMemberInfo {
   spend?: number | null;
   total_spend?: number | null;
   using_team_default_budget?: boolean;
+  bitovi_budget_breakdown?: {
+    team_default?: number | null;
+    base?: number | null;
+    recurring_additive?: number;
+    temp_additive?: number;
+    effective_max?: number | null;
+    using_team_default_base?: boolean;
+    temp_active?: boolean;
+  } | null;
   model_max_budget_usage?: Record<
     string,
     {

@@ -208,6 +208,7 @@ async def _sync_one_config_team(
             http_request=_http_request(),
             user_api_key_dict=user_api_key_dict,
         )
+        await _enforce_member_budget_inheritance_after_sync(team_id=team_id)
         verbose_proxy_logger.info(
             "Created config team team_id=%s team_alias=%s",
             team_id,
@@ -238,12 +239,26 @@ async def _sync_one_config_team(
         http_request=_http_request(),
         user_api_key_dict=user_api_key_dict,
     )
+    await _enforce_member_budget_inheritance_after_sync(team_id=existing.team_id)
     verbose_proxy_logger.info(
         "Updated config team team_id=%s team_alias=%s",
         existing.team_id,
         entry.team_alias,
     )
     return existing.team_id
+
+
+async def _enforce_member_budget_inheritance_after_sync(*, team_id: str) -> None:
+    from litellm.proxy.proxy_server import prisma_client, user_api_key_cache
+    from litellm_bitovi.proxy.config_teams.member_budget_inheritance import (
+        enforce_config_team_member_budget_inheritance,
+    )
+
+    await enforce_config_team_member_budget_inheritance(
+        team_id=team_id,
+        prisma_client=prisma_client,
+        user_api_key_cache=user_api_key_cache,
+    )
 
 
 async def apply_team_member_budget_to_sa_key(
@@ -267,6 +282,7 @@ async def apply_team_member_budget_to_sa_key(
         return
 
     from litellm.proxy.auth.auth_checks import get_team_member_default_budget
+    from litellm_bitovi.proxy.config_teams.member_budget_policy import INHERITS_TEAM_MEMBER_BUDGET_KEY
 
     budget = await get_team_member_default_budget(
         budget_id=budget_id,
@@ -279,3 +295,8 @@ async def apply_team_member_budget_to_sa_key(
     data.max_budget = budget.max_budget
     if getattr(data, "budget_duration", None) is None and budget.budget_duration is not None:
         data.budget_duration = budget.budget_duration
+
+    existing_metadata = getattr(data, "metadata", None)
+    key_metadata = dict(existing_metadata) if isinstance(existing_metadata, Mapping) else {}
+    key_metadata[INHERITS_TEAM_MEMBER_BUDGET_KEY] = True
+    data.metadata = key_metadata

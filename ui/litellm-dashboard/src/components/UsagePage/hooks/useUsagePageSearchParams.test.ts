@@ -11,6 +11,7 @@ describe("parseUsageView", () => {
 
   it("accepts known UsageOption values", () => {
     expect(parseUsageView("my-budgets")).toBe("my-budgets");
+    expect(parseUsageView("key-budgets")).toBe("key-budgets");
     expect(parseUsageView("team")).toBe("team");
     expect(parseUsageView("global")).toBe("global");
   });
