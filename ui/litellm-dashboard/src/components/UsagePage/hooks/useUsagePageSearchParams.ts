@@ -11,6 +11,7 @@ export const USAGE_OPTIONS: readonly UsageOption[] = [
   "global",
   "my-usage",
   "my-budgets",
+  "key-budgets",
   "organization",
   "team",
   "customer",

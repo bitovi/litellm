@@ -16,6 +16,7 @@ export type UsageOption =
   | "global"
   | "my-usage"
   | "my-budgets"
+  | "key-budgets"
   | "organization"
   | "team"
   | "customer"
@@ -68,6 +69,13 @@ const OPTIONS: OptionConfig[] = [
     label: "My Budgets",
     description: "Track spend against your per-user and per-model team budgets",
     icon: <AccountBookOutlined style={{ fontSize: "16px" }} />,
+  },
+  {
+    value: "key-budgets",
+    label: "Key Cycle Budgets",
+    description: "Keys with user, current-cycle spend, and % of budget used",
+    icon: <AccountBookOutlined style={{ fontSize: "16px" }} />,
+    adminOnly: true,
   },
   {
     value: "organization",

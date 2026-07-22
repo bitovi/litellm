@@ -11,3 +11,7 @@ Headroom savings:
 
 - `HeadroomCompressionPanel.tsx` — mounted from Logs `LogDetailContent`
 - `HeadroomSavingsView.tsx` — mounted from Usage view `headroom`
+
+Key cycle budgets:
+
+- `KeyCycleBudgetsView.tsx` — mounted from Usage view `key-budgets`
