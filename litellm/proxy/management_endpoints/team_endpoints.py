@@ -3787,13 +3787,13 @@ async def _resolve_effective_budget_for_member_me(
     membership: Optional[LiteLLM_TeamMembership],
     prisma_client: PrismaClient,
     user_api_key_cache: Any,
-) -> Tuple[Optional[LiteLLM_BudgetTable], bool]:
+) -> Tuple[Optional[LiteLLM_BudgetTable], bool, Optional[Dict[str, Any]]]:
     """
     Prefer the membership's own budget when it has a max_budget; otherwise fall
     back to the team's default per-member budget (team_member_budget_id).
 
-    Bitovi: config teams (is_from_config) always inherit the team default;
-    per-member budget rows are ignored for display and treated as non-overrides.
+    Bitovi: config teams always inherit the team default plus per-user additive
+    policy (permanent / recurring / temp) from membership metadata.
     """
     team_metadata = team_table.metadata if isinstance(team_table.metadata, dict) else None
     from litellm_bitovi.proxy.config_teams import (
@@ -3802,19 +3802,21 @@ async def _resolve_effective_budget_for_member_me(
     )
 
     if config_team_forces_member_budget_inheritance(team_metadata):
-        return await resolve_config_team_member_budget(
+        budget, using_default, breakdown = await resolve_config_team_member_budget(
             team_metadata=team_metadata,
             prisma_client=prisma_client,
             user_api_key_cache=user_api_key_cache,
+            membership=membership,
         )
+        return budget, using_default, breakdown
 
     membership_budget = membership.litellm_budget_table if membership is not None else None
     if membership_budget is not None and membership_budget.max_budget is not None:
-        return membership_budget, False
+        return membership_budget, False, None
 
     default_budget_id = team_metadata.get("team_member_budget_id") if team_metadata is not None else None
     if not isinstance(default_budget_id, str):
-        return membership_budget, False
+        return membership_budget, False, None
 
     default_budget = await get_team_member_default_budget(
         budget_id=default_budget_id,
@@ -3822,8 +3824,8 @@ async def _resolve_effective_budget_for_member_me(
         user_api_key_cache=user_api_key_cache,
     )
     if default_budget is None:
-        return membership_budget, False
-    return default_budget, True
+        return membership_budget, False, None
+    return default_budget, True, None
 
 
 async def _build_model_max_budget_usage_for_member_me(
@@ -3947,11 +3949,13 @@ async def team_member_me(
     )
     user_email = getattr(user_row, "user_email", None) if user_row is not None else None
 
-    effective_budget, using_team_default_budget = await _resolve_effective_budget_for_member_me(
-        team_table=team_table,
-        membership=membership,
-        prisma_client=prisma_client,
-        user_api_key_cache=user_api_key_cache,
+    effective_budget, using_team_default_budget, bitovi_budget_breakdown = (
+        await _resolve_effective_budget_for_member_me(
+            team_table=team_table,
+            membership=membership,
+            prisma_client=prisma_client,
+            user_api_key_cache=user_api_key_cache,
+        )
     )
     model_max_budget_usage = await _build_model_max_budget_usage_for_member_me(
         team_table=team_table,
@@ -3976,6 +3980,7 @@ async def team_member_me(
             litellm_budget_table=effective_budget,
             model_max_budget_usage=model_max_budget_usage,
             using_team_default_budget=using_team_default_budget,
+            bitovi_budget_breakdown=bitovi_budget_breakdown,
         )
 
     return TeamMemberInfoResponse(
@@ -3990,8 +3995,10 @@ async def team_member_me(
         if membership.budget_id is not None
         else getattr(effective_budget, "budget_id", None),
         litellm_budget_table=effective_budget,
+        metadata=membership.metadata,
         model_max_budget_usage=model_max_budget_usage,
         using_team_default_budget=using_team_default_budget,
+        bitovi_budget_breakdown=bitovi_budget_breakdown,
     )
 
 

@@ -40,6 +40,7 @@ interface MemberModalProps<T extends BaseMember> {
   initialData?: T | null;
   mode: "add" | "edit";
   config: ModalConfig;
+  extraContent?: React.ReactNode;
 }
 
 const MemberModal = <T extends BaseMember>({
@@ -49,6 +50,7 @@ const MemberModal = <T extends BaseMember>({
   initialData,
   mode,
   config,
+  extraContent,
 }: MemberModalProps<T>) => {
   const [form] = Form.useForm();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -242,6 +244,8 @@ const MemberModal = <T extends BaseMember>({
             {renderField(field)}
           </Form.Item>
         ))}
+
+        {extraContent}
 
         <div className="text-right mt-6">
           <AntButton onClick={onCancel} className="mr-2" disabled={isSubmitting}>

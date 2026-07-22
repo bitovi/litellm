@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { KeyResponse, Team } from "@/components/key_team_helpers/key_list";
 import {
+  buildTeamMemberBudgetContext,
   percentOfCycleBudget,
   resolveKeyCycleBudget,
   toKeyCycleBudgetRow,
@@ -100,16 +101,53 @@ describe("percentOfCycleBudget", () => {
 
 describe("resolveKeyCycleBudget", () => {
   it("prefers key max_budget over team", () => {
-    expect(resolveKeyCycleBudget(makeKey({ max_budget: 100 }), teams)).toEqual({
+    expect(resolveKeyCycleBudget(makeKey({ max_budget: 100 }), teams)).toMatchObject({
       budget: 100,
       budget_source: "key",
     });
   });
 
-  it("falls back to team max_budget when key budget is unset", () => {
-    expect(resolveKeyCycleBudget(makeKey({ max_budget: 0 }), teams)).toEqual({
+  it("falls back to team max_budget when key budget is unset and no member context", () => {
+    expect(resolveKeyCycleBudget(makeKey({ max_budget: 0 }), teams)).toMatchObject({
       budget: 500,
       budget_source: "team",
+    });
+  });
+
+  it("uses effective team member pool including temp boost", () => {
+    const contexts = {
+      "team-1": buildTeamMemberBudgetContext({
+        team_info: {
+          team_member_budget_table: {
+            max_budget: 100,
+            budget_duration: "30d",
+            budget_reset_at: "2026-08-01T00:00:00Z",
+          },
+        },
+        team_memberships: [
+          {
+            user_id: "alice@bitovi.com",
+            spend: 12,
+            metadata: {
+              bitovi_budget_policy: {
+                temp_additive: 50,
+              },
+            },
+          },
+        ],
+      }),
+    };
+    const resolved = resolveKeyCycleBudget(
+      makeKey({ max_budget: 0, team_max_budget: 0 }),
+      teams.map((t) => ({ ...t, max_budget: null })),
+      contexts,
+    );
+    expect(resolved).toMatchObject({
+      budget: 150,
+      budget_source: "member",
+      budget_boost_label: "+$50 temp",
+      spend: 12,
+      budget_duration: "30d",
     });
   });
 });

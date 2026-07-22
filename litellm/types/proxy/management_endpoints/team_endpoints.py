@@ -127,3 +127,5 @@ class TeamMemberInfoResponse(LiteLLM_TeamMembership):
     model_max_budget_usage: Optional[Dict[str, Any]] = None
     # True when litellm_budget_table was filled from the team's default member budget
     using_team_default_budget: bool = False
+    # Bitovi: base / recurring / temp breakdown when config-team policy applies
+    bitovi_budget_breakdown: Optional[Dict[str, Any]] = None

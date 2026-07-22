@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Progress, Table, Typography } from "antd";
+import { Alert, Progress, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
 import { formatNumberWithCommas } from "@/utils/dataUtils";
-import { keyListCall } from "@/components/networking";
+import { keyListCall, teamInfoCall } from "@/components/networking";
 import type { KeyResponse, Team } from "@/components/key_team_helpers/key_list";
+import {
+  computeEffectiveMemberBudget,
+  parseMemberBudgetPolicy,
+} from "@/components/bitovi/memberBudgetPolicy";
+
+export type KeyCycleBudgetSource = "key" | "team" | "member" | "none";
 
 export type KeyCycleBudgetRow = {
   token_id: string;
@@ -15,26 +21,158 @@ export type KeyCycleBudgetRow = {
   team_alias: string;
   spend: number;
   budget: number | null;
-  budget_source: "key" | "team" | "none";
+  budget_source: KeyCycleBudgetSource;
+  budget_boost_label: string | null;
   budget_duration: string | null;
   budget_reset_at: string | null;
   percent_used: number | null;
 };
 
+export type TeamMemberBudgetContext = {
+  teamDefault: number | null;
+  budgetDuration: string | null;
+  budgetResetAt: string | null;
+  membershipsByUserId: Record<
+    string,
+    {
+      metadata?: Record<string, unknown> | null;
+      spend?: number | null;
+    }
+  >;
+};
+
+function boostLabelFromEffective(effective: {
+  usingTeamDefaultBase: boolean;
+  base: number | null;
+  recurringAdditive: number;
+  tempAdditive: number;
+  tempActive: boolean;
+}): string | null {
+  const parts: string[] = [];
+  if (!effective.usingTeamDefaultBase && effective.base != null) {
+    parts.push(`perm $${formatNumberWithCommas(effective.base)}`);
+  }
+  if (effective.recurringAdditive > 0) {
+    parts.push(`+$${formatNumberWithCommas(effective.recurringAdditive)} recurring`);
+  }
+  if (effective.tempActive && effective.tempAdditive > 0) {
+    parts.push(`+$${formatNumberWithCommas(effective.tempAdditive)} temp`);
+  }
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+export function buildTeamMemberBudgetContext(teamInfoResponse: {
+  team_info?: {
+    team_member_budget_table?: {
+      max_budget?: number | null;
+      budget_duration?: string | null;
+      budget_reset_at?: string | null;
+    } | null;
+  };
+  team_memberships?: Array<{
+    user_id?: string;
+    metadata?: Record<string, unknown> | null;
+    spend?: number | null;
+    litellm_budget_table?: {
+      max_budget?: number | null;
+      budget_duration?: string | null;
+      budget_reset_at?: string | null;
+    } | null;
+  }>;
+}): TeamMemberBudgetContext {
+  const table = teamInfoResponse.team_info?.team_member_budget_table;
+  const membershipsByUserId: TeamMemberBudgetContext["membershipsByUserId"] = {};
+  for (const membership of teamInfoResponse.team_memberships ?? []) {
+    if (!membership.user_id) continue;
+    membershipsByUserId[membership.user_id] = {
+      metadata: membership.metadata ?? null,
+      spend: membership.spend ?? null,
+    };
+  }
+  return {
+    teamDefault: typeof table?.max_budget === "number" ? table.max_budget : null,
+    budgetDuration: table?.budget_duration ?? null,
+    budgetResetAt: table?.budget_reset_at ?? null,
+    membershipsByUserId,
+  };
+}
+
 export function resolveKeyCycleBudget(
   key: KeyResponse,
   teams: Team[],
-): { budget: number | null; budget_source: "key" | "team" | "none" } {
+  memberContexts: Record<string, TeamMemberBudgetContext> = {},
+): {
+  budget: number | null;
+  budget_source: KeyCycleBudgetSource;
+  budget_boost_label: string | null;
+  budget_duration: string | null;
+  budget_reset_at: string | null;
+  spend: number;
+} {
   const keyBudget = key.max_budget;
   if (typeof keyBudget === "number" && Number.isFinite(keyBudget) && keyBudget > 0) {
-    return { budget: keyBudget, budget_source: "key" };
+    const spend = typeof key.spend === "number" && Number.isFinite(key.spend) ? key.spend : 0;
+    return {
+      budget: keyBudget,
+      budget_source: "key",
+      budget_boost_label: null,
+      budget_duration: key.budget_duration || null,
+      budget_reset_at: key.budget_reset_at || null,
+      spend,
+    };
   }
+
+  const teamId = key.team_id;
+  if (typeof teamId === "string" && teamId) {
+    const context = memberContexts[teamId];
+    if (context) {
+      const membership = key.user_id ? context.membershipsByUserId[key.user_id] : undefined;
+      const policy = parseMemberBudgetPolicy(membership?.metadata ?? null);
+      const effective = computeEffectiveMemberBudget(context.teamDefault, policy);
+      if (effective.effectiveMax != null) {
+        const memberSpend =
+          typeof membership?.spend === "number" && Number.isFinite(membership.spend)
+            ? membership.spend
+            : typeof key.team_member_spend === "number" && Number.isFinite(key.team_member_spend)
+              ? key.team_member_spend
+              : typeof key.spend === "number" && Number.isFinite(key.spend)
+                ? key.spend
+                : 0;
+        return {
+          budget: effective.effectiveMax,
+          budget_source: "member",
+          budget_boost_label: boostLabelFromEffective(effective),
+          budget_duration: context.budgetDuration,
+          budget_reset_at: context.budgetResetAt,
+          spend: memberSpend,
+        };
+      }
+    }
+  }
+
   const team = teams.find((t) => t.team_id === key.team_id);
   const teamBudget = team?.max_budget ?? key.team_max_budget;
   if (typeof teamBudget === "number" && Number.isFinite(teamBudget) && teamBudget > 0) {
-    return { budget: teamBudget, budget_source: "team" };
+    const spend = typeof key.spend === "number" && Number.isFinite(key.spend) ? key.spend : 0;
+    return {
+      budget: teamBudget,
+      budget_source: "team",
+      budget_boost_label: null,
+      budget_duration: key.budget_duration || team?.budget_duration || null,
+      budget_reset_at: key.budget_reset_at || null,
+      spend,
+    };
   }
-  return { budget: null, budget_source: "none" };
+
+  const spend = typeof key.spend === "number" && Number.isFinite(key.spend) ? key.spend : 0;
+  return {
+    budget: null,
+    budget_source: "none",
+    budget_boost_label: null,
+    budget_duration: key.budget_duration || null,
+    budget_reset_at: key.budget_reset_at || null,
+    spend,
+  };
 }
 
 export function percentOfCycleBudget(spend: number, budget: number | null): number | null {
@@ -44,9 +182,12 @@ export function percentOfCycleBudget(spend: number, budget: number | null): numb
   return Math.min(999, Math.max(0, (spend / budget) * 100));
 }
 
-export function toKeyCycleBudgetRow(key: KeyResponse, teams: Team[]): KeyCycleBudgetRow {
-  const { budget, budget_source } = resolveKeyCycleBudget(key, teams);
-  const spend = typeof key.spend === "number" && Number.isFinite(key.spend) ? key.spend : 0;
+export function toKeyCycleBudgetRow(
+  key: KeyResponse,
+  teams: Team[],
+  memberContexts: Record<string, TeamMemberBudgetContext> = {},
+): KeyCycleBudgetRow {
+  const resolved = resolveKeyCycleBudget(key, teams, memberContexts);
   return {
     token_id: key.token_id || key.token || key.key_name,
     key_alias: key.key_alias || key.key_name || "(unnamed)",
@@ -54,12 +195,13 @@ export function toKeyCycleBudgetRow(key: KeyResponse, teams: Team[]): KeyCycleBu
     user_email: key.user_email || "",
     team_id: key.team_id,
     team_alias: key.team_alias || "",
-    spend,
-    budget,
-    budget_source,
-    budget_duration: key.budget_duration || null,
-    budget_reset_at: key.budget_reset_at || null,
-    percent_used: percentOfCycleBudget(spend, budget),
+    spend: resolved.spend,
+    budget: resolved.budget,
+    budget_source: resolved.budget_source,
+    budget_boost_label: resolved.budget_boost_label,
+    budget_duration: resolved.budget_duration,
+    budget_reset_at: resolved.budget_reset_at,
+    percent_used: percentOfCycleBudget(resolved.spend, resolved.budget),
   };
 }
 
@@ -95,7 +237,21 @@ export function KeyCycleBudgetsView({ accessToken, teams }: KeyCycleBudgetsViewP
         "desc",
       );
       const keys: KeyResponse[] = data?.keys ?? data?.data ?? [];
-      setRows(keys.map((key) => toKeyCycleBudgetRow(key, teams)));
+      const teamIds = Array.from(
+        new Set(keys.map((key) => key.team_id).filter((id): id is string => typeof id === "string" && !!id)),
+      );
+      const memberContexts: Record<string, TeamMemberBudgetContext> = {};
+      await Promise.all(
+        teamIds.map(async (teamId) => {
+          try {
+            const teamInfo = await teamInfoCall(accessToken, teamId);
+            memberContexts[teamId] = buildTeamMemberBudgetContext(teamInfo ?? {});
+          } catch {
+            // Keep resolving other teams; key/team fallbacks still apply.
+          }
+        }),
+      );
+      setRows(keys.map((key) => toKeyCycleBudgetRow(key, teams, memberContexts)));
       setTotal(typeof data?.total_count === "number" ? data.total_count : keys.length);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -157,11 +313,25 @@ export function KeyCycleBudgetsView({ accessToken, teams }: KeyCycleBudgetsViewP
         title: "Cycle budget",
         dataIndex: "budget",
         key: "budget",
-        width: 140,
+        width: 180,
         render: (budget: number | null, row) => {
           if (budget == null) return "Unlimited";
-          const suffix = row.budget_source === "team" ? " (team)" : "";
-          return `$${formatNumberWithCommas(budget)}${suffix}`;
+          const suffix =
+            row.budget_source === "team"
+              ? " (team)"
+              : row.budget_source === "member"
+                ? " (member)"
+                : "";
+          return (
+            <div>
+              <div>{`$${formatNumberWithCommas(budget)}${suffix}`}</div>
+              {row.budget_boost_label ? (
+                <Tag color="blue" className="mt-1">
+                  {row.budget_boost_label}
+                </Tag>
+              ) : null}
+            </div>
+          );
         },
       },
       {
@@ -209,8 +379,9 @@ export function KeyCycleBudgetsView({ accessToken, teams }: KeyCycleBudgetsViewP
     <div className="mt-4">
       <Typography.Title level={4}>Key cycle budgets</Typography.Title>
       <Typography.Paragraph type="secondary">
-        Spend vs each key&apos;s current budget cycle (<code>max_budget</code> / <code>budget_duration</code>).
-        Proxy admins only. This is the key-level counter — not the team-member pool shown under My Budgets.
+        Prefers each key&apos;s own <code>max_budget</code> when set. Otherwise uses the same{" "}
+        <strong>team member pool</strong> as the Members tab (including permanent / recurring / temp
+        boosts). Proxy admins only.
       </Typography.Paragraph>
       {error ? <Alert type="error" showIcon className="mb-4" message={error} /> : null}
       <Table<KeyCycleBudgetRow>

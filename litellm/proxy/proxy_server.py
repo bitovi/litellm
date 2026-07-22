@@ -16022,6 +16022,9 @@ app.include_router(spend_management_router)
 from litellm_bitovi.proxy.headroom.endpoints import router as bitovi_headroom_router
 
 app.include_router(bitovi_headroom_router)
+from litellm_bitovi.proxy.config_teams.endpoints import router as bitovi_team_budget_router
+
+app.include_router(bitovi_team_budget_router)
 app.include_router(caching_router)
 app.include_router(analytics_router)
 app.include_router(callback_management_endpoints_router)

@@ -323,7 +323,7 @@ async def test_sync_does_not_clobber_non_config_team() -> None:
 
 @pytest.mark.asyncio
 async def test_apply_team_member_budget_to_sa_key() -> None:
-    data = SimpleNamespace(user_id=None, max_budget=None, budget_duration=None)
+    data = SimpleNamespace(user_id=None, max_budget=None, budget_duration=None, metadata=None)
     team_table = SimpleNamespace(metadata={"team_member_budget_id": "b1"})
     budget = SimpleNamespace(max_budget=100.0, budget_duration="30d")
 
@@ -340,6 +340,7 @@ async def test_apply_team_member_budget_to_sa_key() -> None:
 
     assert data.max_budget == 100.0
     assert data.budget_duration == "30d"
+    assert data.metadata["inherits_team_member_budget"] is True
 
 
 @pytest.mark.asyncio
