@@ -46,6 +46,7 @@ litellm_bitovi/
 |------|----------|---------------|
 | Config teams parse + startup sync | `proxy_server.py` | `proxy.config_teams` |
 | Config team budget locks | `team_endpoints.py` | `proxy.config_teams` |
+| Config team member budget inheritance | `team_endpoints.py`, `auth_checks.py` | `proxy.config_teams.member_budget_inheritance` |
 | VK ownership defaults | `key_management_endpoints.py` | `proxy.key_hooks.ownership` |
 | Model budget windows | `hooks/model_max_budget_limiter.py` | `proxy.budget.windows` |
 | SSO 5-user gate | `ui_sso.py`, enterprise `internal_user_endpoints.py` | `proxy.sso.policy` |

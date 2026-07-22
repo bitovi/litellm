@@ -3783,15 +3783,21 @@ async def _check_team_member_budget(
 
         # Per-member override wins; otherwise fall back to the team-level
         # default configured via team.metadata["team_member_budget_id"].
+        # Bitovi: config teams always inherit the team default (no overrides).
         team_member_budget: Optional[float] = None
+        from litellm_bitovi.proxy.config_teams import config_team_forces_member_budget_inheritance
+
+        team_metadata = team_object.metadata if isinstance(team_object.metadata, dict) else None
+        force_team_default = config_team_forces_member_budget_inheritance(team_metadata)
         if (
-            team_membership is not None
+            not force_team_default
+            and team_membership is not None
             and team_membership.litellm_budget_table is not None
             and team_membership.litellm_budget_table.max_budget is not None
         ):
             team_member_budget = team_membership.litellm_budget_table.max_budget
         else:
-            default_budget_id = (team_object.metadata or {}).get("team_member_budget_id")
+            default_budget_id = (team_metadata or {}).get("team_member_budget_id")
             if isinstance(default_budget_id, str):
                 default_budget = await get_team_member_default_budget(
                     budget_id=default_budget_id,

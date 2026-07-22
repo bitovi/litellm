@@ -3791,12 +3791,27 @@ async def _resolve_effective_budget_for_member_me(
     """
     Prefer the membership's own budget when it has a max_budget; otherwise fall
     back to the team's default per-member budget (team_member_budget_id).
+
+    Bitovi: config teams (is_from_config) always inherit the team default;
+    per-member budget rows are ignored for display and treated as non-overrides.
     """
+    team_metadata = team_table.metadata if isinstance(team_table.metadata, dict) else None
+    from litellm_bitovi.proxy.config_teams import (
+        config_team_forces_member_budget_inheritance,
+        resolve_config_team_member_budget,
+    )
+
+    if config_team_forces_member_budget_inheritance(team_metadata):
+        return await resolve_config_team_member_budget(
+            team_metadata=team_metadata,
+            prisma_client=prisma_client,
+            user_api_key_cache=user_api_key_cache,
+        )
+
     membership_budget = membership.litellm_budget_table if membership is not None else None
     if membership_budget is not None and membership_budget.max_budget is not None:
         return membership_budget, False
 
-    team_metadata = team_table.metadata if isinstance(team_table.metadata, dict) else None
     default_budget_id = team_metadata.get("team_member_budget_id") if team_metadata is not None else None
     if not isinstance(default_budget_id, str):
         return membership_budget, False

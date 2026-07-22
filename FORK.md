@@ -90,6 +90,7 @@ bitovi/litellm_bitovi/  + owned UI folders  (edit freely; rarely conflict)
 |------|--------------------|--------------|
 | Config teams parse + sync | `litellm/proxy/proxy_server.py` | `litellm_bitovi.proxy.config_teams` |
 | Config team locks | `team_endpoints.py` | same |
+| Config team member budget inheritance | `team_endpoints.py`, `auth_checks.py` | `litellm_bitovi.proxy.config_teams.member_budget_inheritance` |
 | VK auto-assign | `key_management_endpoints.py` | `litellm_bitovi.proxy.key_hooks` |
 | Budget window helpers | `hooks/model_max_budget_limiter.py` | `litellm_bitovi.proxy.budget` |
 | SSO 5-user gate | `ui_sso.py`, enterprise `internal_user_endpoints.py` | `litellm_bitovi.proxy.sso.policy` |

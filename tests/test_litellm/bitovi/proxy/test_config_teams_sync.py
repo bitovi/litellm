@@ -117,6 +117,10 @@ async def test_sync_creates_missing_team() -> None:
             "litellm.proxy.management_endpoints.team_endpoints.update_team",
             new=AsyncMock(),
         ),
+        patch(
+            "litellm_bitovi.proxy.config_teams.sync._enforce_member_budget_inheritance_after_sync",
+            new=AsyncMock(),
+        ),
     ):
         synced = await sync_config_teams(
             config_teams=parse_config_teams(
@@ -178,6 +182,10 @@ async def test_sync_updates_existing_config_team() -> None:
         patch(
             "litellm.proxy.management_endpoints.team_endpoints.update_team",
             new=fake_update_team,
+        ),
+        patch(
+            "litellm_bitovi.proxy.config_teams.sync._enforce_member_budget_inheritance_after_sync",
+            new=AsyncMock(),
         ),
     ):
         synced = await sync_config_teams(
@@ -248,6 +256,10 @@ async def test_sync_update_includes_models_when_configured() -> None:
         patch(
             "litellm.proxy.management_endpoints.team_endpoints.update_team",
             new=fake_update_team,
+        ),
+        patch(
+            "litellm_bitovi.proxy.config_teams.sync._enforce_member_budget_inheritance_after_sync",
+            new=AsyncMock(),
         ),
     ):
         await sync_config_teams(
