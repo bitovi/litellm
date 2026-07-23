@@ -1,13 +1,5 @@
 kind: container
 
-# Crossplane cutover (bitovi-platform-services migration, ADR 0004): one
-# ContainerApp XR replaces the chart-rendered workload + ACK footprint
-# (ECR + push role + bedrock role + db-backup bucket). Convention-named,
-# so no importIds. CNPG cluster, valkey, and the litellm-config ConfigMap
-# are separate sources, untouched. Live Deployment adopts in place.
-crossplane:
-  enabled: true
-  deletionProtection: true
 iam:
   oidcSubjects:
     - repo:bitovi/litellm:ref:refs/tags/v*
