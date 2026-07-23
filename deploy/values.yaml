@@ -7,7 +7,7 @@ kind: container
 # are separate sources, untouched. Live Deployment adopts in place.
 crossplane:
   enabled: true
-  deletionProtection: true
+  deletionProtection: false
 iam:
   oidcSubjects:
     - repo:bitovi/litellm:ref:refs/tags/v*
