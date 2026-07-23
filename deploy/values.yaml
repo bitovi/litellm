@@ -6,7 +6,6 @@ kind: container
 # so no importIds. CNPG cluster, valkey, and the litellm-config ConfigMap
 # are separate sources, untouched. Live Deployment adopts in place.
 crossplane:
-  enabled: true
   deletionProtection: false
 iam:
   oidcSubjects:
