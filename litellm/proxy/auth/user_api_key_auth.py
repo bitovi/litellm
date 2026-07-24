@@ -1784,7 +1784,12 @@ async def _user_api_key_auth_builder(
                                 include={"litellm_budget_table": True},
                             )
                             if _db_member is not None:
-                                team_member_info = LiteLLM_TeamMembership(**_db_member.dict())
+                                # Bitovi: coerce Json metadata + build membership model
+                                from litellm_bitovi.proxy.config_teams import (
+                                    team_membership_from_db_row,
+                                )
+
+                                team_member_info = team_membership_from_db_row(_db_member)
                                 await user_api_key_cache.async_set_cache(
                                     key=_cache_key,
                                     value=team_member_info,
@@ -1793,7 +1798,22 @@ async def _user_api_key_auth_builder(
                                 )
 
                     if team_member_info is not None and team_member_info.litellm_budget_table is not None:
-                        team_member_budget = team_member_info.litellm_budget_table.max_budget
+                        # Bitovi: config-team policy-aware cap (not shared row alone)
+                        from litellm_bitovi.proxy.config_teams import (
+                            effective_team_member_max_budget_for_auth,
+                        )
+
+                        team_member_budget = await effective_team_member_max_budget_for_auth(
+                            team_metadata=(
+                                valid_token.team_metadata
+                                if isinstance(valid_token.team_metadata, dict)
+                                else None
+                            ),
+                            membership=team_member_info,
+                            prisma_client=prisma_client,
+                            user_api_key_cache=user_api_key_cache,
+                            linked_budget_max=team_member_info.litellm_budget_table.max_budget,
+                        )
                         if team_member_budget is not None and team_member_budget > 0:
                             # Read from cross-pod counter (Redis-first) if available
                             from litellm.proxy.proxy_server import get_current_spend

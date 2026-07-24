@@ -1,5 +1,6 @@
 from litellm_bitovi.proxy.config_teams.member_budget_inheritance import (
     config_team_forces_member_budget_inheritance,
+    effective_team_member_max_budget_for_auth,
     enforce_config_team_member_budget_inheritance,
     refresh_inheriting_keys_for_team,
     resolve_config_team_member_budget,
@@ -15,6 +16,13 @@ from litellm_bitovi.proxy.config_teams.member_budget_policy import (
     merge_policy_into_membership_metadata,
     parse_member_budget_policy,
     policy_to_metadata_dict,
+)
+from litellm_bitovi.proxy.config_teams.membership_metadata import (
+    coerce_membership_metadata,
+    invalidate_team_membership_auth_caches,
+    metadata_for_prisma_write,
+    team_membership_cache_keys,
+    team_membership_from_db_row,
 )
 from litellm_bitovi.proxy.config_teams.sync import (
     CONFIG_MEMBER_BUDGET_FIELDS,
@@ -44,14 +52,18 @@ __all__ = (
     "apply_policy_update",
     "apply_team_member_budget_to_sa_key",
     "budget_fields_in_payload",
+    "coerce_membership_metadata",
     "compute_effective_max_budget",
     "config_team_forces_member_budget_inheritance",
+    "effective_team_member_max_budget_for_auth",
     "effective_to_breakdown_dict",
     "enforce_config_team_member_budget_inheritance",
     "extract_model_list_budgets",
+    "invalidate_team_membership_auth_caches",
     "is_config_team_sync_active",
     "merge_policy_into_membership_metadata",
     "merge_team_model_max_budget",
+    "metadata_for_prisma_write",
     "normalize_budget_config_dict",
     "parse_config_teams",
     "parse_member_budget_policy",
@@ -61,4 +73,6 @@ __all__ = (
     "resolve_inheriting_key_max_budget",
     "sync_config_teams",
     "team_is_from_config",
+    "team_membership_cache_keys",
+    "team_membership_from_db_row",
 )

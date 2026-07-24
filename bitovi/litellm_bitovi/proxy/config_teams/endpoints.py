@@ -210,16 +210,22 @@ async def put_member_budget_policy(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     new_metadata = merge_policy_into_membership_metadata(existing_metadata, updated_policy)
-    # Prisma Json columns require a JSON string (or prisma.Json), not a raw dict.
+    from litellm_bitovi.proxy.config_teams.membership_metadata import (
+        invalidate_team_membership_auth_caches,
+        metadata_for_prisma_write,
+    )
+
+    # Store a JSON object (prisma.Json(dict)), never json.dumps(str), so reads
+    # return a dict and LiteLLM_TeamMembership / budget policy keep working.
     updated = await TeamMembershipRepository(prisma_client).table.update(
         where={"user_id_team_id": {"user_id": user_id, "team_id": team_id}},
-        data={"metadata": json.dumps(new_metadata)},
+        data={"metadata": metadata_for_prisma_write(new_metadata)},
     )
-    if user_api_key_cache is not None:
-        try:
-            await user_api_key_cache.async_delete_cache(key=f"team_membership:{user_id}:{team_id}")
-        except Exception:
-            pass
+    await invalidate_team_membership_auth_caches(
+        user_api_key_cache=user_api_key_cache,
+        user_id=user_id,
+        team_id=team_id,
+    )
 
     updated_metadata = getattr(updated, "metadata", new_metadata)
     if isinstance(updated_metadata, str):

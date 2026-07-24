@@ -16,6 +16,7 @@ from litellm.proxy.utils import ProxyLogging
 from litellm_bitovi.proxy.config_teams import CONFIG_TEAM_METADATA_KEY
 from litellm_bitovi.proxy.config_teams.member_budget_inheritance import (
     config_team_forces_member_budget_inheritance,
+    effective_team_member_max_budget_for_auth,
     enforce_config_team_member_budget_inheritance,
     refresh_inheriting_keys_for_team,
     resolve_config_team_member_budget,
@@ -176,6 +177,57 @@ async def test_resolve_applies_policy_when_metadata_is_json_string() -> None:
     assert budget.max_budget == 150.0
     assert breakdown is not None
     assert breakdown["temp_additive"] == 50
+
+
+@pytest.mark.asyncio
+async def test_user_api_key_auth_path_honors_override_over_linked_budget_row() -> None:
+    """
+    Regression for production 429 after budget-policy PUT:
+
+    user_api_key_auth Check 3 used litellm_budget_table.max_budget (shared team
+    default, e.g. $130) and ignored membership.metadata policy additives. Spend
+    just over $130 kept 429ing even after a temp/permanent override was saved.
+    """
+    prisma = MagicMock()
+    budget_row = SimpleNamespace(
+        dict=lambda: {
+            "budget_id": "b-shared",
+            "max_budget": 130.0,
+            "soft_budget": None,
+            "max_parallel_requests": None,
+            "tpm_limit": None,
+            "rpm_limit": None,
+            "model_max_budget": None,
+            "budget_duration": "30d",
+            "budget_reset_at": None,
+        }
+    )
+    budget_table = MagicMock()
+    budget_table.find_unique = AsyncMock(return_value=budget_row)
+    membership = SimpleNamespace(
+        metadata=json.dumps({POLICY_METADATA_KEY: {"temp_additive": 50}}),
+        litellm_budget_table=SimpleNamespace(max_budget=130.0),
+    )
+
+    with patch(
+        "litellm.repositories.budget_repository.BudgetRepository",
+        return_value=SimpleNamespace(table=budget_table),
+    ):
+        # Pre-fix behavior: callers used linked row ($130) directly.
+        linked_only = membership.litellm_budget_table.max_budget
+        assert linked_only == 130.0
+
+        resolved = await effective_team_member_max_budget_for_auth(
+            team_metadata={
+                CONFIG_TEAM_METADATA_KEY: True,
+                "team_member_budget_id": "b-shared",
+            },
+            membership=membership,
+            prisma_client=prisma,
+            linked_budget_max=linked_only,
+        )
+
+    assert resolved == 180.0
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, Mapping, Optional, Tuple
 
 from litellm._logging import verbose_proxy_logger
@@ -11,6 +10,9 @@ from litellm_bitovi.proxy.config_teams.member_budget_policy import (
     compute_effective_max_budget,
     effective_to_breakdown_dict,
     parse_member_budget_policy,
+)
+from litellm_bitovi.proxy.config_teams.membership_metadata import (
+    coerce_membership_metadata,
 )
 from litellm_bitovi.proxy.config_teams.sync import team_is_from_config
 
@@ -26,23 +28,43 @@ def _team_member_budget_id(metadata: Mapping[str, Any] | None) -> Optional[str]:
     return budget_id if isinstance(budget_id, str) else None
 
 
-def _coerce_membership_metadata(metadata: Any) -> Mapping[str, Any] | None:
-    """Prisma Json columns may come back as dict or as a JSON string."""
-    if isinstance(metadata, Mapping):
-        return metadata
-    if isinstance(metadata, str):
-        try:
-            parsed = json.loads(metadata)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return None
-        return parsed if isinstance(parsed, Mapping) else None
-    return None
-
-
 def _membership_metadata(membership: Any) -> Mapping[str, Any] | None:
     if membership is None:
         return None
-    return _coerce_membership_metadata(getattr(membership, "metadata", None))
+    return coerce_membership_metadata(getattr(membership, "metadata", None))
+
+
+async def effective_team_member_max_budget_for_auth(
+    *,
+    team_metadata: Mapping[str, Any] | None,
+    membership: Any,
+    prisma_client: Any,
+    user_api_key_cache: Any = None,
+    linked_budget_max: Optional[float] = None,
+) -> Optional[float]:
+    """
+    Max budget for the early team-member check in user_api_key_auth.
+
+    Config teams must not use the shared LiteLLM_BudgetTable.max_budget alone
+    (team default); permanent/recurring/temp additives live on membership metadata.
+    """
+    if config_team_forces_member_budget_inheritance(team_metadata):
+        effective_budget, _using_default, _breakdown = await resolve_config_team_member_budget(
+            team_metadata=team_metadata,
+            prisma_client=prisma_client,
+            user_api_key_cache=user_api_key_cache,
+            membership=membership,
+        )
+        if (
+            effective_budget is not None
+            and effective_budget.max_budget is not None
+            and effective_budget.max_budget > 0
+        ):
+            return effective_budget.max_budget
+        return None
+    if linked_budget_max is not None and linked_budget_max > 0:
+        return linked_budget_max
+    return None
 
 
 async def resolve_config_team_member_budget(
