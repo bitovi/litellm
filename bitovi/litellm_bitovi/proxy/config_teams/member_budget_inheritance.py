@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Mapping, Optional, Tuple
 
 from litellm._logging import verbose_proxy_logger
@@ -25,11 +26,23 @@ def _team_member_budget_id(metadata: Mapping[str, Any] | None) -> Optional[str]:
     return budget_id if isinstance(budget_id, str) else None
 
 
+def _coerce_membership_metadata(metadata: Any) -> Mapping[str, Any] | None:
+    """Prisma Json columns may come back as dict or as a JSON string."""
+    if isinstance(metadata, Mapping):
+        return metadata
+    if isinstance(metadata, str):
+        try:
+            parsed = json.loads(metadata)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        return parsed if isinstance(parsed, Mapping) else None
+    return None
+
+
 def _membership_metadata(membership: Any) -> Mapping[str, Any] | None:
     if membership is None:
         return None
-    metadata = getattr(membership, "metadata", None)
-    return metadata if isinstance(metadata, Mapping) else None
+    return _coerce_membership_metadata(getattr(membership, "metadata", None))
 
 
 async def resolve_config_team_member_budget(

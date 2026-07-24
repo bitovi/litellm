@@ -1443,7 +1443,16 @@ async def get_team_membership(
         if response is None:
             return None
 
-        _response = LiteLLM_TeamMembership(**response.dict())
+        # Bitovi: Prisma Json metadata may be a JSON string after budget-policy
+        # writes (json.dumps). Coerce before LiteLLM_TeamMembership validation,
+        # otherwise membership load fails and member budget overrides are ignored.
+        membership_data = response.dict()
+        raw_metadata = membership_data.get("metadata")
+        if isinstance(raw_metadata, str):
+            parsed_metadata = safe_json_loads(raw_metadata)
+            membership_data["metadata"] = parsed_metadata if isinstance(parsed_metadata, dict) else None
+
+        _response = LiteLLM_TeamMembership(**membership_data)
         await user_api_key_cache.async_set_cache(
             key=_key,
             value=_response,

@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import litellm
+from litellm.caching.dual_cache import DualCache
+from litellm.proxy._types import LiteLLM_TeamTable, LiteLLM_UserTable, UserAPIKeyAuth
+from litellm.proxy.auth.auth_checks import _check_team_member_budget, get_team_membership
+from litellm.proxy.utils import ProxyLogging
 from litellm_bitovi.proxy.config_teams import CONFIG_TEAM_METADATA_KEY
 from litellm_bitovi.proxy.config_teams.member_budget_inheritance import (
     config_team_forces_member_budget_inheritance,
@@ -121,6 +127,188 @@ async def test_resolve_applies_membership_policy_additives() -> None:
     assert breakdown is not None
     assert breakdown["recurring_additive"] == 100
     assert breakdown["temp_additive"] == 50
+
+
+@pytest.mark.asyncio
+async def test_resolve_applies_policy_when_metadata_is_json_string() -> None:
+    """Budget-policy PUT stores metadata via json.dumps; Prisma may return a str."""
+    prisma = MagicMock()
+    budget_row = SimpleNamespace(
+        dict=lambda: {
+            "budget_id": "b-shared",
+            "max_budget": 100.0,
+            "soft_budget": None,
+            "max_parallel_requests": None,
+            "tpm_limit": None,
+            "rpm_limit": None,
+            "model_max_budget": None,
+            "budget_duration": "30d",
+            "budget_reset_at": None,
+        }
+    )
+    budget_table = MagicMock()
+    budget_table.find_unique = AsyncMock(return_value=budget_row)
+    membership = SimpleNamespace(
+        metadata=json.dumps(
+            {
+                POLICY_METADATA_KEY: {
+                    "temp_additive": 50,
+                }
+            }
+        )
+    )
+
+    with patch(
+        "litellm.repositories.budget_repository.BudgetRepository",
+        return_value=SimpleNamespace(table=budget_table),
+    ):
+        budget, using_default, breakdown = await resolve_config_team_member_budget(
+            team_metadata={
+                CONFIG_TEAM_METADATA_KEY: True,
+                "team_member_budget_id": "b-shared",
+            },
+            prisma_client=prisma,
+            membership=membership,
+        )
+
+    assert using_default is False
+    assert budget is not None
+    assert budget.max_budget == 150.0
+    assert breakdown is not None
+    assert breakdown["temp_additive"] == 50
+
+
+@pytest.mark.asyncio
+async def test_get_team_membership_loads_json_string_metadata() -> None:
+    """Regression: string metadata must not fail LiteLLM_TeamMembership validation."""
+    prisma = MagicMock()
+    cache = DualCache()
+    membership_row = SimpleNamespace(
+        dict=lambda: {
+            "user_id": "u1",
+            "team_id": "systems",
+            "spend": 120.0,
+            "total_spend": 120.0,
+            "budget_id": "b-shared",
+            "metadata": json.dumps({POLICY_METADATA_KEY: {"temp_additive": 50}}),
+            "litellm_budget_table": None,
+        }
+    )
+    membership_table = MagicMock()
+    membership_table.find_unique = AsyncMock(return_value=membership_row)
+
+    with patch(
+        "litellm.proxy.auth.auth_checks.TeamMembershipRepository",
+        return_value=SimpleNamespace(table=membership_table),
+    ):
+        membership = await get_team_membership(
+            user_id="u1",
+            team_id="systems",
+            prisma_client=prisma,
+            user_api_key_cache=cache,
+        )
+
+    assert membership is not None
+    assert membership.metadata == {POLICY_METADATA_KEY: {"temp_additive": 50}}
+
+
+@pytest.mark.asyncio
+async def test_budget_override_applies_when_membership_metadata_is_json_string() -> None:
+    """
+    Regression for 429-after-override: budget-policy PUT stores membership
+    metadata as json.dumps(...). Prisma returns a str; auth must still load
+    membership and enforce team_default + temp_additive (not team_default alone).
+
+    Spend $120 with team default $100 and temp +$50 must be allowed.
+    Spend $160 must still 429 against effective $150.
+    """
+    team_object = LiteLLM_TeamTable(
+        team_id="systems",
+        metadata={
+            CONFIG_TEAM_METADATA_KEY: True,
+            "team_member_budget_id": "b-shared",
+        },
+    )
+    user_object = LiteLLM_UserTable(user_id="u1")
+    valid_token = UserAPIKeyAuth(token="tok", user_id="u1", team_id="systems")
+    proxy_logging_obj = ProxyLogging(user_api_key_cache=None)
+    prisma = MagicMock()
+    cache = DualCache()
+
+    membership_row = SimpleNamespace(
+        dict=lambda: {
+            "user_id": "u1",
+            "team_id": "systems",
+            "spend": 120.0,
+            "total_spend": 120.0,
+            "budget_id": "b-shared",
+            "metadata": json.dumps({POLICY_METADATA_KEY: {"temp_additive": 50}}),
+            "litellm_budget_table": None,
+        }
+    )
+    membership_table = MagicMock()
+    membership_table.find_unique = AsyncMock(return_value=membership_row)
+
+    budget_row = SimpleNamespace(
+        dict=lambda: {
+            "budget_id": "b-shared",
+            "max_budget": 100.0,
+            "soft_budget": None,
+            "max_parallel_requests": None,
+            "tpm_limit": None,
+            "rpm_limit": None,
+            "model_max_budget": None,
+            "budget_duration": "30d",
+            "budget_reset_at": None,
+        }
+    )
+    budget_table = MagicMock()
+    budget_table.find_unique = AsyncMock(return_value=budget_row)
+
+    current_spend = 120.0
+
+    async def mock_get_current_spend(counter_key, fallback_spend, max_budget=None, **kwargs):
+        if counter_key == "spend:team_member:u1:systems":
+            return current_spend
+        return fallback_spend
+
+    with (
+        patch(
+            "litellm.proxy.auth.auth_checks.TeamMembershipRepository",
+            return_value=SimpleNamespace(table=membership_table),
+        ),
+        patch(
+            "litellm.repositories.budget_repository.BudgetRepository",
+            return_value=SimpleNamespace(table=budget_table),
+        ),
+        patch("litellm.proxy.proxy_server.get_current_spend", mock_get_current_spend),
+        patch(
+            "litellm.proxy.common_utils.user_api_key_cache.get_management_object_ttl",
+            return_value=60.0,
+        ),
+    ):
+        await _check_team_member_budget(
+            team_object=team_object,
+            user_object=user_object,
+            valid_token=valid_token,
+            prisma_client=prisma,
+            user_api_key_cache=cache,
+            proxy_logging_obj=proxy_logging_obj,
+        )
+
+        current_spend = 160.0
+        with pytest.raises(litellm.BudgetExceededError) as exc_info:
+            await _check_team_member_budget(
+                team_object=team_object,
+                user_object=user_object,
+                valid_token=valid_token,
+                prisma_client=prisma,
+                user_api_key_cache=cache,
+                proxy_logging_obj=proxy_logging_obj,
+            )
+
+    assert exc_info.value.current_cost == 160.0
+    assert exc_info.value.max_budget == 150.0
 
 
 @pytest.mark.asyncio
