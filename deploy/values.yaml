@@ -1,5 +1,4 @@
 kind: container
-
 iam:
   oidcSubjects:
     - repo:bitovi/litellm:ref:refs/tags/v*
@@ -27,7 +26,7 @@ app:
 # Do not edit by hand - update-deploy-values (publish-platform-proxy-image.yml)
 # writes this on every vX.Y.Z release.
 image:
-  tag: "v0.0.16"
+  tag: "v0.0.17"
 ingress:
   host: llm-proxy.bitovi-tools.com
 onePasswordItem:
