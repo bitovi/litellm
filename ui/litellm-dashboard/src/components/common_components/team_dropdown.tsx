@@ -3,6 +3,7 @@ import { Select, Typography } from "antd";
 import { LoadingOutlined } from "@ant-design/icons";
 import { useDebouncedState } from "@tanstack/react-pacer/debouncer";
 import { useInfiniteTeams } from "@/app/(dashboard)/hooks/teams/useTeams";
+import { DEBOUNCE_WAIT_MS } from "@/utils/debounceConstants";
 import { Team } from "../key_team_helpers/key_list";
 
 const { Text } = Typography;
@@ -20,7 +21,6 @@ interface TeamDropdownProps {
 }
 
 const SCROLL_THRESHOLD = 0.8;
-const DEBOUNCE_MS = 300;
 
 const TeamDropdown: React.FC<TeamDropdownProps> = ({
   value,
@@ -33,7 +33,7 @@ const TeamDropdown: React.FC<TeamDropdownProps> = ({
 }) => {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useDebouncedState("", {
-    wait: DEBOUNCE_MS,
+    wait: DEBOUNCE_WAIT_MS,
   });
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } = useInfiniteTeams(

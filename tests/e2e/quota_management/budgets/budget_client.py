@@ -1,4 +1,4 @@
-"""Client for budget e2e tests: the shared Gateway plus budget-bearing entity
+"""Client for budget e2e tests: the shared ProxyClient plus budget-bearing entity
 management (user / team / team-member / org / customer / tag / budget-table) and
 info reads.
 
@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from pydantic import AliasPath, BaseModel, Field, RootModel
 
-from e2e_gateway import Gateway, build_gateway
+from proxy_client import ProxyClient
 from e2e_http import AuthHeaders, NoBody, Result, StreamingResponse, Success, unwrap
 from models import (
     BudgetWindow,
@@ -34,10 +34,24 @@ _TEAM_READY_SLEEP_SECONDS = 0.4
 
 class UserNewBody(BaseModel):
     max_budget: float
+    budget_duration: str | None = None
 
 
 class UserNewResponse(BaseModel):
     user_id: str
+
+
+class UserInfoParams(BaseModel):
+    user_id: str
+
+
+class UserInfoRow(BaseModel):
+    spend: float | None = None
+    max_budget: float | None = None
+
+
+class UserInfoResponse(BaseModel):
+    user_info: UserInfoRow | None = None
 
 
 class UserDeleteBody(BaseModel):
@@ -52,6 +66,7 @@ class CustomerNewBody(BaseModel):
 class OrgNewBody(BaseModel):
     organization_alias: str
     max_budget: float
+    budget_duration: str | None = None
 
 
 class OrgNewResponse(BaseModel):
@@ -60,6 +75,14 @@ class OrgNewResponse(BaseModel):
 
 class OrgDeleteBody(BaseModel):
     organization_ids: list[str]
+
+
+class OrgInfoParams(BaseModel):
+    organization_id: str
+
+
+class OrgInfoResponse(BaseModel):
+    budget_id: str | None = None
 
 
 class TeamMember(BaseModel):
@@ -72,6 +95,7 @@ class TeamNewBody(BaseModel):
     max_budget: float | None = None
     team_member_budget: float | None = None
     team_member_budget_duration: str | None = None
+    budget_duration: str | None = None
     organization_id: str | None = None
     budget_limits: list[BudgetWindow] | None = None
     model_max_budget: dict[str, ModelBudgetEntry] | None = None
@@ -226,9 +250,9 @@ def assert_model_usage(
 
 @dataclass(frozen=True, slots=True)
 class BudgetClient:
-    gateway: Gateway
+    proxy: ProxyClient
 
-    # ---- generic key ops (delegate to the shared Gateway) ---------------
+    # ---- generic key ops (delegate to the shared ProxyClient) ---------------
 
     def generate_key(
         self,
@@ -241,9 +265,10 @@ class BudgetClient:
         user_id: str | None = None,
         team_id: str | None = None,
         model_max_budget: dict[str, ModelBudgetEntry] | None = None,
+        budget_fallbacks: dict[str, list[str]] | None = None,
         budget_limits: list[BudgetWindow] | None = None,
     ) -> str:
-        return self.gateway.generate_key(
+        return self.proxy.generate_key(
             KeyGenerateBody(
                 models=models or [],
                 max_budget=max_budget,
@@ -253,18 +278,19 @@ class BudgetClient:
                 user_id=user_id,
                 team_id=team_id,
                 model_max_budget=model_max_budget,
+                budget_fallbacks=budget_fallbacks,
                 budget_limits=budget_limits,
             )
         )
 
     def delete_key(self, key: str) -> None:
-        self.gateway.delete_key(key)
+        self.proxy.delete_key(key)
 
     def key_info(self, key: str) -> KeyInfo:
-        return self.gateway.key_info(key)
+        return self.proxy.key_info(key)
 
     def delete_customers(self, user_ids: list[str]) -> None:
-        self.gateway.delete_customers(user_ids)
+        self.proxy.delete_customers(user_ids)
 
     # ---- chat (raw HTTP outcome: a budget block surfaces as a non-2xx) --
 
@@ -278,9 +304,9 @@ class BudgetClient:
         user: str | None = None,
         tags: list[str] | None = None,
     ) -> StreamingResponse:
-        return self.gateway.transport.send(
+        return self.proxy.transport.send(
             "/chat/completions",
-            headers=self.gateway.transport.bearer(key),
+            headers=self.proxy.transport.bearer(key),
             json=ChatBody(
                 model=model,
                 messages=[ChatMessage(role="user", content=content)],
@@ -298,7 +324,7 @@ class BudgetClient:
         *,
         max_tokens: int = 16,
     ) -> StreamingResponse:
-        return self.gateway.transport.send(
+        return self.proxy.transport.send(
             "/v1/messages",
             headers=AnthropicV1Headers(authorization=f"Bearer {key}"),
             json=AnthropicV1MessageBody(
@@ -310,30 +336,43 @@ class BudgetClient:
 
     # ---- internal user --------------------------------------------------
 
-    def create_user(self, *, max_budget: float) -> str:
+    def create_user(self, *, max_budget: float, budget_duration: str | None = None) -> str:
         return unwrap(
-            self.gateway.transport.post(
+            self.proxy.transport.post(
                 "/user/new",
-                headers=self.gateway.transport.master,
-                json=UserNewBody(max_budget=max_budget),
+                headers=self.proxy.transport.master,
+                json=UserNewBody(max_budget=max_budget, budget_duration=budget_duration),
                 response_type=UserNewResponse,
             )
         ).user_id
 
     def delete_user(self, user_id: str) -> None:
-        _ = self.gateway.transport.post(
+        _ = self.proxy.transport.post(
             "/user/delete",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=UserDeleteBody(user_ids=[user_id]),
             response_type=NoBody,
         )
 
+    def user_info(self, user_id: str) -> UserInfoRow | None:
+        result = self.proxy.transport.get(
+            "/user/info",
+            headers=self.proxy.transport.master,
+            params=UserInfoParams(user_id=user_id),
+            response_type=UserInfoResponse,
+        )
+        match result:
+            case Success(data=data):
+                return data.user_info
+            case _:
+                return None
+
     # ---- customer / end-user -------------------------------------------
 
     def create_customer(self, customer_id: str, *, max_budget: float) -> str:
-        resp = self.gateway.transport.send(
+        resp = self.proxy.transport.send(
             "/customer/new",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=CustomerNewBody(user_id=customer_id, max_budget=max_budget),
         )
         assert resp.ok, resp.body
@@ -341,20 +380,40 @@ class BudgetClient:
 
     # ---- organization ---------------------------------------------------
 
-    def create_org(self, *, max_budget: float, alias: str) -> str:
+    def create_org(self, *, max_budget: float, alias: str, budget_duration: str | None = None) -> str:
         return unwrap(
-            self.gateway.transport.post(
+            self.proxy.transport.post(
                 "/organization/new",
-                headers=self.gateway.transport.master,
-                json=OrgNewBody(organization_alias=alias, max_budget=max_budget),
+                headers=self.proxy.transport.master,
+                json=OrgNewBody(
+                    organization_alias=alias,
+                    max_budget=max_budget,
+                    budget_duration=budget_duration,
+                ),
                 response_type=OrgNewResponse,
             )
         ).organization_id
 
+    def org_budget_id(self, org_id: str) -> str | None:
+        """The id of the budget row backing an org; its budget_reset_at is read via
+        budget_info (LIT-4570: /organization/new stores budget_duration without
+        scheduling budget_reset_at, so the reset job's first tick schedules it)."""
+        result = self.proxy.transport.get(
+            "/organization/info",
+            headers=self.proxy.transport.master,
+            params=OrgInfoParams(organization_id=org_id),
+            response_type=OrgInfoResponse,
+        )
+        match result:
+            case Success(data=data):
+                return data.budget_id
+            case _:
+                return None
+
     def delete_org(self, org_id: str) -> None:
-        _ = self.gateway.transport.delete(
+        _ = self.proxy.transport.delete(
             "/organization/delete",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=OrgDeleteBody(organization_ids=[org_id]),
             response_type=NoBody,
         )
@@ -368,20 +427,22 @@ class BudgetClient:
         max_budget: float | None = None,
         team_member_budget: float | None = None,
         team_member_budget_duration: str | None = None,
+        budget_duration: str | None = None,
         organization_id: str | None = None,
         budget_limits: list[BudgetWindow] | None = None,
         model_max_budget: dict[str, ModelBudgetEntry] | None = None,
         metadata: dict[str, object] | None = None,
     ) -> str:
         team_id = unwrap(
-            self.gateway.transport.post(
+            self.proxy.transport.post(
                 "/team/new",
-                headers=self.gateway.transport.master,
+                headers=self.proxy.transport.master,
                 json=TeamNewBody(
                     team_alias=alias,
                     max_budget=max_budget,
                     team_member_budget=team_member_budget,
                     team_member_budget_duration=team_member_budget_duration,
+                    budget_duration=budget_duration,
                     organization_id=organization_id,
                     budget_limits=budget_limits,
                     model_max_budget=model_max_budget,
@@ -401,9 +462,9 @@ class BudgetClient:
         team_member_budget: float | None = None,
         max_budget: float | None = None,
     ) -> None:
-        resp = self.gateway.transport.send(
+        resp = self.proxy.transport.send(
             "/team/update",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=TeamUpdateBody(
                 team_id=team_id,
                 model_max_budget=model_max_budget,
@@ -421,9 +482,9 @@ class BudgetClient:
         team_member_budget: float | None = None,
         max_budget: float | None = None,
     ):
-        return self.gateway.transport.send(
+        return self.proxy.transport.send(
             "/team/update",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=TeamUpdateBody(
                 team_id=team_id,
                 model_max_budget=model_max_budget,
@@ -433,9 +494,9 @@ class BudgetClient:
         )
 
     def team_model_max_budget(self, team_id: str) -> dict[str, ModelBudgetEntry | dict[str, float | str]] | None:
-        result = self.gateway.transport.get(
+        result = self.proxy.transport.get(
             "/team/info",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             params=TeamInfoParams(team_id=team_id),
             response_type=TeamInfoResponse,
         )
@@ -448,9 +509,9 @@ class BudgetClient:
                 return None
 
     def delete_team(self, team_id: str) -> None:
-        _ = self.gateway.transport.post(
+        _ = self.proxy.transport.post(
             "/team/delete",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=TeamDeleteBody(team_ids=[team_id]),
             response_type=NoBody,
         )
@@ -458,9 +519,9 @@ class BudgetClient:
     def _wait_for_team(self, team_id: str) -> None:
         last: Result[TeamInfoResponse] | None = None
         for _ in range(_TEAM_READY_ATTEMPTS):
-            last = self.gateway.transport.get(
+            last = self.proxy.transport.get(
                 "/team/info",
-                headers=self.gateway.transport.master,
+                headers=self.proxy.transport.master,
                 params=TeamInfoParams(team_id=team_id),
                 response_type=TeamInfoResponse,
             )
@@ -482,9 +543,9 @@ class BudgetClient:
     ) -> None:
         last_body = ""
         for attempt in range(_TEAM_READY_ATTEMPTS):
-            resp = self.gateway.transport.send(
+            resp = self.proxy.transport.send(
                 "/team/member_add",
-                headers=self.gateway.transport.master,
+                headers=self.proxy.transport.master,
                 json=TeamMemberAddBody(
                     team_id=team_id,
                     member=TeamMember(role="user", user_id=user_id),
@@ -510,9 +571,9 @@ class BudgetClient:
         budget_duration: str | None = None,
         model_max_budget_in_team: dict[str, ModelBudgetEntry] | None = None,
     ) -> None:
-        resp = self.gateway.transport.send(
+        resp = self.proxy.transport.send(
             "/team/member_update",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=TeamMemberUpdateBody(
                 team_id=team_id,
                 user_id=user_id,
@@ -527,9 +588,9 @@ class BudgetClient:
         """The member's per-team budget_reset_at as /team/info reports it, or None if
         no reset is scheduled. The reset job advances this each time the window
         elapses; a job that skips the row leaves it pinned forever."""
-        result = self.gateway.transport.get(
+        result = self.proxy.transport.get(
             "/team/info",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             params=TeamInfoParams(team_id=team_id),
             response_type=TeamInfoResponse,
         )
@@ -545,18 +606,18 @@ class BudgetClient:
     # ---- tag ------------------------------------------------------------
 
     def create_tag(self, name: str, *, max_budget: float) -> str:
-        resp = self.gateway.transport.send(
+        resp = self.proxy.transport.send(
             "/tag/new",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=TagNewBody(name=name, max_budget=max_budget),
         )
         assert resp.ok, resp.body
         return name
 
     def delete_tag(self, name: str) -> None:
-        _ = self.gateway.transport.post(
+        _ = self.proxy.transport.post(
             "/tag/delete",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=TagDeleteBody(name=name),
             response_type=NoBody,
         )
@@ -571,9 +632,9 @@ class BudgetClient:
         budget_duration: str | None = None,
     ) -> str:
         return unwrap(
-            self.gateway.transport.post(
+            self.proxy.transport.post(
                 "/budget/new",
-                headers=self.gateway.transport.master,
+                headers=self.proxy.transport.master,
                 json=BudgetNewBody(
                     max_budget=max_budget,
                     soft_budget=soft_budget,
@@ -584,17 +645,17 @@ class BudgetClient:
         ).budget_id
 
     def delete_budget(self, budget_id: str) -> None:
-        _ = self.gateway.transport.post(
+        _ = self.proxy.transport.post(
             "/budget/delete",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=BudgetDeleteBody(id=budget_id),
             response_type=NoBody,
         )
 
     def budget_info(self, budget_id: str) -> tuple[BudgetRow, ...]:
-        result = self.gateway.transport.post(
+        result = self.proxy.transport.post(
             "/budget/info",
-            headers=self.gateway.transport.master,
+            headers=self.proxy.transport.master,
             json=BudgetInfoBody(budgets=[budget_id]),
             response_type=BudgetInfoResponse,
         )
@@ -605,5 +666,5 @@ class BudgetClient:
                 return ()
 
 
-def build_client() -> BudgetClient:
-    return BudgetClient(gateway=build_gateway())
+def build_client(proxy: ProxyClient) -> BudgetClient:
+    return BudgetClient(proxy=proxy)

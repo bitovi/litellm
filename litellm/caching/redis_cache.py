@@ -41,7 +41,7 @@ def _redis_json_default(obj: Any) -> Any:
         return obj.isoformat()
     model_dump = getattr(obj, "model_dump", None)
     if callable(model_dump):
-        return model_dump(mode="json", exclude_none=True)
+        return model_dump(mode="json")
     return str(obj)
 
 

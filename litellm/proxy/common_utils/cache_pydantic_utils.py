@@ -31,7 +31,7 @@ def _json_safe_default(obj: Any) -> Any:
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
     if isinstance(obj, BaseModel):
-        return obj.model_dump(mode="json", exclude_none=True)
+        return obj.model_dump(mode="json")
     return str(obj)
 
 
@@ -57,7 +57,7 @@ class CacheCodec:
         Encode a value for DualCache / Redis (``json.dumps``-safe).
 
         If ``model_type`` is set, the payload is validated with that model, then
-        ``model_dump(mode="json", exclude_none=True)`` — symmetric with ``deserialize``.
+        ``model_dump(mode="json")`` — symmetric with ``deserialize``.
 
         If the value is already an instance of ``model_type`` (or a subclass),
         ``model_validate`` is skipped to avoid an unnecessary Pydantic copy — the
@@ -70,12 +70,12 @@ class CacheCodec:
         if model_type is not None:
             if isinstance(value, model_type):
                 # Already the right type: dump directly, skip re-validation copy.
-                return value.model_dump(mode="json", exclude_none=True)
+                return value.model_dump(mode="json")
             if isinstance(value, (dict, BaseModel)):
-                return model_type.model_validate(value).model_dump(mode="json", exclude_none=True)
+                return model_type.model_validate(value).model_dump(mode="json")
             return value
         if isinstance(value, BaseModel):
-            return value.model_dump(mode="json", exclude_none=True)
+            return value.model_dump(mode="json")
         if isinstance(value, dict):
             return _json_safe_dict(value)
         return value
