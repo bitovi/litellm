@@ -94,8 +94,10 @@ bitovi/litellm_bitovi/  + owned UI folders  (edit freely; rarely conflict)
 | Config team member budget policy API | `proxy_server.py` (`include_router`) | `litellm_bitovi.proxy.config_teams.endpoints` |
 | VK auto-assign | `key_management_endpoints.py` | `litellm_bitovi.proxy.key_hooks` |
 | Budget window helpers | `hooks/model_max_budget_limiter.py` | `litellm_bitovi.proxy.budget` |
-| SSO 5-user gate | `ui_sso.py`, enterprise `internal_user_endpoints.py` | `litellm_bitovi.proxy.sso.policy` |
+| SSO 5-user gate (login path) | `ui_sso.py` only | `litellm_bitovi.proxy.sso.policy` |
 | Premium unlock | `proxy_server.py` (`premium_user`) | `litellm_bitovi.proxy.license.policy` |
+
+Enterprise `internal_user_endpoints.py` (`/user/available_users` SSO 5-seat display) stays **byte-identical to upstream**. Bitovi `resolve_premium_user` keeps `premium_user` True, so upstream's `if not premium_user:` seat injection never runs; do not re-patch that file.
 | Headroom savings API mount | `proxy_server.py` (`include_router`) | `litellm_bitovi.proxy.headroom.endpoints` |
 | Headroom savings record | `guardrail_hooks/headroom/headroom.py` (one call) | `litellm_bitovi.proxy.headroom.savings` |
 | Redis datetime JSON | `redis_cache.py`, `cache_pydantic_utils.py` | keep tiny; prefer upstream PR |

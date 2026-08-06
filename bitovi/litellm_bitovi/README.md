@@ -50,8 +50,10 @@ litellm_bitovi/
 | Config team member budget policy API | `proxy_server.py` (`include_router`) | `proxy.config_teams.endpoints` |
 | VK ownership defaults | `key_management_endpoints.py` | `proxy.key_hooks.ownership` |
 | Model budget windows | `hooks/model_max_budget_limiter.py` | `proxy.budget.windows` |
-| SSO 5-user gate | `ui_sso.py`, enterprise `internal_user_endpoints.py` | `proxy.sso.policy` |
+| SSO 5-user gate (login path) | `ui_sso.py` only | `proxy.sso.policy` |
 | Premium unlock (guardrails, etc.) | `proxy_server.py` (`premium_user`) | `proxy.license.policy` |
+
+Enterprise `internal_user_endpoints.py` is not a Bitovi seam: keep it upstream-identical. Premium unlock already bypasses its `if not premium_user:` SSO seat display.
 | Headroom savings API | `proxy_server.py` (`include_router` only) | `proxy.headroom.endpoints` |
 | Headroom savings record | `headroom.py` one-line call + spend metadata field | `proxy.headroom.savings` |
 

@@ -30,7 +30,6 @@ async def available_enterprise_users(
     )
     from litellm.repositories.team_repository import TeamRepository
     from litellm.repositories.user_repository import UserRepository
-    from litellm_bitovi.proxy.sso.policy import should_enforce_non_premium_sso_user_limit
 
     if prisma_client is None:
         raise HTTPException(
@@ -38,7 +37,8 @@ async def available_enterprise_users(
             detail={"error": CommonProxyErrors.db_not_connected_error.value},
         )
 
-    if should_enforce_non_premium_sso_user_limit() and not premium_user:
+    if not premium_user:
+        # check if SSO is enabled - show 5 user limit
         from litellm.proxy.auth.auth_utils import _has_user_setup_sso
 
         if _has_user_setup_sso():
