@@ -674,8 +674,15 @@ class HeadroomGuardrail(CustomGuardrail):
             merged_tools = _merge_headroom_retrieve_tools(existing_tools)
             return {**inputs, "structured_messages": compressed, "tools": merged_tools}  # pyright: ignore[reportReturnType]
 
-        _inject_headroom_retrieve_into_request_tools(request_data)
-        return {**inputs, "structured_messages": compressed}  # pyright: ignore[reportReturnType]
+        if isinstance(request_data.get("tools"), list):
+            _inject_headroom_retrieve_into_request_tools(request_data)
+            return {**inputs, "structured_messages": compressed}  # pyright: ignore[reportReturnType]
+
+        return {
+            **inputs,
+            "structured_messages": compressed,
+            "tools": [_build_headroom_retrieve_tool()],
+        }  # pyright: ignore[reportReturnType]
 
     async def async_should_run_agentic_loop(
         self,
