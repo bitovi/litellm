@@ -91,7 +91,9 @@ function CreateKeyPageContent() {
     }
   }, [token]);
 
-  if (authLoading || redirectToLogin || isLegacyRedirect) {
+  const isRedirecting = redirectToLogin || isLegacyRedirect;
+
+  if (authLoading || isRedirecting) {
     return <LoadingScreen />;
   }
 
