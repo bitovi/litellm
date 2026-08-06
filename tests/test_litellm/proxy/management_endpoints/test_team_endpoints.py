@@ -1557,6 +1557,7 @@ async def test_process_team_members_single_member():
             default_team_budget_id="budget-123",
             allowed_models=None,
             budget_duration=None,
+            model_max_budget_in_team=None,
         )
 
 
@@ -10223,3 +10224,111 @@ def test_patch_team_route_publishes_its_request_body_schema():
     assert schema == {"$ref": "#/components/schemas/PatchTeamRequest"}
     properties = app.openapi()["components"]["schemas"]["PatchTeamRequest"]["properties"]
     assert "tpm_limit" in properties and "metadata" in properties
+@pytest.mark.asyncio
+async def test_update_team_persists_model_max_budget():
+    from fastapi import Request
+
+    from litellm.proxy._types import UpdateTeamRequest, UserAPIKeyAuth
+    from litellm.proxy.management_endpoints.team_endpoints import update_team
+
+    proxy_admin = UserAPIKeyAuth(
+        user_role=LitellmUserRoles.PROXY_ADMIN,
+        user_id="proxy-admin-model-budget-test",
+        models=[],
+    )
+
+    model_max_budget = {
+        "claude-sonnet-4-6": {"budget_limit": 20, "time_period": "1d"},
+    }
+    update_request = UpdateTeamRequest(
+        team_id="team-model-budget-123",
+        model_max_budget=model_max_budget,
+    )
+
+    dummy_request = MagicMock(spec=Request)
+
+    with (
+        patch("litellm.proxy.proxy_server.prisma_client") as mock_prisma,
+        patch("litellm.proxy.proxy_server.user_api_key_cache") as mock_cache,
+        patch("litellm.proxy.proxy_server.litellm_proxy_admin_name", "admin"),
+        patch("litellm.proxy.proxy_server.create_audit_log_for_update", new=AsyncMock()),
+    ):
+        mock_existing_team = MagicMock()
+        mock_existing_team.team_id = "team-model-budget-123"
+        mock_existing_team.organization_id = None
+        mock_existing_team.max_budget = None
+        mock_existing_team.model_id = None
+        mock_existing_team.model_dump.return_value = {
+            "team_id": "team-model-budget-123",
+            "organization_id": None,
+            "max_budget": None,
+            "members_with_roles": [
+                {"user_id": "proxy-admin-model-budget-test", "role": "admin"}
+            ],
+        }
+        mock_prisma.db.litellm_teamtable.find_unique = AsyncMock(return_value=mock_existing_team)
+        mock_prisma.jsonify_team_object = lambda db_data: db_data
+        mock_cache.async_get_cache = AsyncMock(return_value=None)
+        mock_cache.async_set_cache = AsyncMock()
+
+        mock_updated_team = MagicMock()
+        mock_updated_team.team_id = "team-model-budget-123"
+        mock_updated_team.organization_id = None
+        mock_updated_team.model_max_budget = model_max_budget
+        mock_updated_team.litellm_model_table = None
+        mock_updated_team.model_dump.return_value = {
+            "team_id": "team-model-budget-123",
+            "organization_id": None,
+            "model_max_budget": model_max_budget,
+        }
+        mock_prisma.db.litellm_teamtable.update = AsyncMock(return_value=mock_updated_team)
+
+        result = await update_team(
+            data=update_request,
+            http_request=dummy_request,
+            user_api_key_dict=proxy_admin,
+        )
+
+        update_data = mock_prisma.db.litellm_teamtable.update.call_args[1]["data"]
+        assert update_data["model_max_budget"]["claude-sonnet-4-6"]["max_budget"] == 20.0
+        assert update_data["model_max_budget"]["claude-sonnet-4-6"]["budget_duration"] == "1d"
+        assert result["data"].model_max_budget == model_max_budget
+
+
+@pytest.mark.asyncio
+async def test_team_member_delete_blocks_self_removal(mock_db_client):
+    from litellm.proxy._types import TeamMemberDeleteRequest
+    from litellm.proxy.management_endpoints.team_endpoints import team_member_delete
+
+    test_team_id = "team-self-del"
+    test_user_id = "self-user"
+
+    mock_team_row = MagicMock()
+    mock_team_row.model_dump.return_value = {
+        "team_id": test_team_id,
+        "members_with_roles": [
+            {"user_id": test_user_id, "user_email": None, "role": "admin"}
+        ],
+        "team_member_permissions": [],
+        "metadata": {},
+        "models": [],
+        "spend": 0.0,
+    }
+    mock_db_client.db.litellm_teamtable.find_unique = AsyncMock(
+        return_value=mock_team_row
+    )
+
+    caller = UserAPIKeyAuth(
+        user_id=test_user_id,
+        user_role=LitellmUserRoles.INTERNAL_USER,
+        team_id=test_team_id,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await team_member_delete(
+            data=TeamMemberDeleteRequest(team_id=test_team_id, user_id=test_user_id),
+            user_api_key_dict=caller,
+        )
+    assert exc_info.value.status_code == 403
+    assert "cannot remove themselves" in str(exc_info.value.detail)
+

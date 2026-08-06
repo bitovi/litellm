@@ -37,17 +37,22 @@ USER root
 COPY --from=uvbin /uv /usr/local/bin/uv
 COPY --from=uvbin /uvx /usr/local/bin/uvx
 
-RUN apk add --no-cache \
-    bash \
-    gcc \
-    python3 \
-    python3-dev \
-    rust \
-    openssl \
-    openssl-dev \
-    nodejs \
-    npm \
-    libsndfile
+# Retry for transient apk.cgr.dev flakes (same pattern as gateway/backend).
+RUN for i in 1 2 3; do \
+      apk add --no-cache \
+        bash \
+        gcc \
+        python3 \
+        python3-dev \
+        rust \
+        openssl \
+        openssl-dev \
+        nodejs \
+        npm \
+        libsndfile && break; \
+      [ $i = 3 ] && { echo "apk add failed after 3 retries" >&2; exit 1; }; \
+      sleep 5; \
+    done
 
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     UV_LINK_MODE=copy \
@@ -57,6 +62,7 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
 COPY pyproject.toml uv.lock ./
 COPY enterprise/pyproject.toml enterprise/
 COPY litellm-proxy-extras/pyproject.toml litellm-proxy-extras/
+COPY bitovi/pyproject.toml bitovi/
 
 # Install third-party dependencies (cached unless pyproject.toml/uv.lock change)
 RUN uv sync --frozen --no-install-project --no-install-workspace --no-default-groups --no-editable \
@@ -101,7 +107,11 @@ FROM $LITELLM_RUNTIME_IMAGE AS runtime
 USER root
 
 # node (without npm) is required by the prisma CLI at runtime
-RUN apk add --no-cache bash openssl tzdata nodejs python3 libsndfile
+RUN for i in 1 2 3; do \
+      apk add --no-cache bash openssl tzdata nodejs python3 libsndfile && break; \
+      [ $i = 3 ] && { echo "apk add failed after 3 retries" >&2; exit 1; }; \
+      sleep 5; \
+    done
 
 WORKDIR /app
 ENV PATH="/app/.venv/bin:${PATH}" \
@@ -123,6 +133,7 @@ COPY --from=builder /app/litellm/proxy/prisma_migration.py /app/litellm/proxy/pr
 # enterprise.enterprise_hooks from it)
 COPY --from=builder /app/enterprise /app/enterprise
 COPY --from=builder /app/litellm-proxy-extras /app/litellm-proxy-extras
+COPY --from=builder /app/bitovi /app/bitovi
 # Prisma CLI + engines are baked under /opt/prisma, a fixed path every
 # runtime uid can read and that no cache volume mount shadows. The paths are
 # pinned via PRISMA_BINARY_CACHE_DIR / PRISMA_CLI_PATH and recorded into the

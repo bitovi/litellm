@@ -13,11 +13,11 @@ export interface SpendMetrics {
   prompt_caching_savings_spend?: number;
 }
 
-export type DailyData = {
+export interface DailyData {
   date: string;
   metrics: SpendMetrics;
   breakdown: BreakdownMetrics;
-};
+}
 
 export interface BreakdownMetrics {
   models: { [key: string]: MetricWithMetadata };

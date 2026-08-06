@@ -117,6 +117,7 @@ def _get_spend_logs_metadata(
             cost_breakdown=None,
             compression_savings=None,
             litellm_call_id=litellm_call_id,
+            headroom_compression=None,
         )
     verbose_proxy_logger.debug(
         "getting payload for SpendLogs, available keys in metadata: " + str(list(metadata.keys()))

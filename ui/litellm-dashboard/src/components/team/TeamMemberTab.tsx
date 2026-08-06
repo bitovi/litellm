@@ -1,11 +1,15 @@
 import { useUISettings } from "@/app/(dashboard)/hooks/uiSettings/useUISettings";
 import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
 import { Member } from "@/components/networking";
-import { DateCell, MoneyCell } from "@/components/shared/table_cells";
+import {
+  computeEffectiveMemberBudget,
+  parseMemberBudgetPolicy,
+} from "@/components/bitovi/memberBudgetPolicy";
+import { formatBudgetReset } from "@/utils/budgetUtils";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
 import { isProxyAdminRole, isUserTeamAdminForSingleTeam } from "@/utils/roles";
 import { InfoCircleOutlined } from "@ant-design/icons";
-import { Space, Tooltip, Typography } from "antd";
+import { Space, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import MemberTable from "@/components/common_components/MemberTable";
 import { TeamData } from "./TeamInfo";
@@ -58,10 +62,55 @@ export default function TeamMemberTab({
     return membership?.total_spend ?? 0;
   };
 
-  const getUserBudget = (userId: string | null): number | null => {
+  const getUserBudget = (userId: string | null): string | null => {
     if (!userId) return null;
     const membership = teamData.team_memberships.find((tm) => tm.user_id === userId);
-    return membership?.litellm_budget_table?.max_budget ?? null;
+    const teamDefault =
+      teamData.team_info.team_member_budget_table?.max_budget ??
+      membership?.litellm_budget_table?.max_budget ??
+      null;
+    const policy = parseMemberBudgetPolicy(membership?.metadata ?? null);
+    const effective = computeEffectiveMemberBudget(
+      typeof teamDefault === "number" ? teamDefault : null,
+      policy,
+    );
+    if (effective.effectiveMax !== null && effective.effectiveMax !== undefined) {
+      return formatNumber(effective.effectiveMax);
+    }
+    return null;
+  };
+
+  const getUserBudgetBoostLabel = (userId: string | null): string | null => {
+    if (!userId) return null;
+    const membership = teamData.team_memberships.find((tm) => tm.user_id === userId);
+    const teamDefault =
+      teamData.team_info.team_member_budget_table?.max_budget ??
+      membership?.litellm_budget_table?.max_budget ??
+      null;
+    const policy = parseMemberBudgetPolicy(membership?.metadata ?? null);
+    const effective = computeEffectiveMemberBudget(
+      typeof teamDefault === "number" ? teamDefault : null,
+      policy,
+    );
+    const parts: string[] = [];
+    if (!effective.usingTeamDefaultBase) {
+      parts.push(`perm $${formatNumber(effective.base)}`);
+    }
+    if (effective.recurringAdditive > 0) {
+      parts.push(`+$${formatNumber(effective.recurringAdditive)} recurring`);
+    }
+    if (effective.tempActive && effective.tempAdditive > 0) {
+      parts.push(`+$${formatNumber(effective.tempAdditive)} temp`);
+    }
+    return parts.length > 0 ? parts.join(", ") : null;
+  };
+
+  const getUserBudgetDuration = (userId: string | null): string | null => {
+    if (!userId) return null;
+    const membership = teamData.team_memberships.find((tm) => tm.user_id === userId);
+    const memberDuration = membership?.litellm_budget_table?.budget_duration;
+    if (memberDuration) return memberDuration;
+    return teamData.team_info.team_member_budget_table?.budget_duration ?? null;
   };
 
   // Helper function to get rate limits for a user
@@ -94,7 +143,7 @@ export default function TeamMemberTab({
   const getUserBudgetReset = (userId: string | null): string | null => {
     if (!userId) return null;
     const membership = teamData.team_memberships.find((tm) => tm.user_id === userId);
-    return membership?.litellm_budget_table?.budget_reset_at ?? null;
+    return formatBudgetReset(membership?.litellm_budget_table?.budget_reset_at);
   };
 
   const extraColumns: ColumnsType<Member> = [
@@ -142,7 +191,7 @@ export default function TeamMemberTab({
       ),
       key: "spend",
       render: (_: unknown, record: Member) => (
-        <MoneyCell value={getUserCurrentCycleSpend(record.user_id)} decimals={4} />
+        <Typography.Text>${formatNumberWithCommas(getUserCurrentCycleSpend(record.user_id), 4)}</Typography.Text>
       ),
     },
     {
@@ -155,19 +204,53 @@ export default function TeamMemberTab({
         </Space>
       ),
       key: "total_spend",
-      render: (_: unknown, record: Member) => <MoneyCell value={getUserTotalSpend(record.user_id)} decimals={4} />,
+      render: (_: unknown, record: Member) => (
+        <Typography.Text>${formatNumberWithCommas(getUserTotalSpend(record.user_id), 4)}</Typography.Text>
+      ),
     },
     {
       title: "Team Member Budget (USD)",
       key: "budget",
-      render: (_: unknown, record: Member) => (
-        <MoneyCell value={getUserBudget(record.user_id)} decimals={4} emptyText="Unlimited" showZero />
-      ),
+      render: (_: unknown, record: Member) => {
+        const budget = getUserBudget(record.user_id);
+        const spend = getUserCurrentCycleSpend(record.user_id);
+        const boostLabel = getUserBudgetBoostLabel(record.user_id);
+        if (!budget) {
+          return <Typography.Text>No Limit</Typography.Text>;
+        }
+        const budgetNum = Number(budget);
+        const percent =
+          budgetNum > 0 ? Math.min(Math.round((spend / budgetNum) * 1000) / 10, 999.9) : 0;
+        const duration = getUserBudgetDuration(record.user_id);
+        return (
+          <div>
+            <Typography.Text>
+              ${formatNumberWithCommas(spend, 2)} of ${formatNumberWithCommas(budgetNum, 2)}
+              {duration ? ` / ${duration}` : ""}
+            </Typography.Text>
+            <Typography.Text type="secondary" className="block text-xs">
+              {percent}% used
+            </Typography.Text>
+            {boostLabel && (
+              <Tag color="blue" className="mt-1">
+                {boostLabel}
+              </Tag>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: "Budget Reset",
       key: "budget_reset",
-      render: (_: unknown, record: Member) => <DateCell value={getUserBudgetReset(record.user_id)} precision="date" />,
+      render: (_: unknown, record: Member) => {
+        const reset = getUserBudgetReset(record.user_id);
+        return reset ? (
+          <Typography.Text>{reset}</Typography.Text>
+        ) : (
+          <Typography.Text type="secondary">—</Typography.Text>
+        );
+      },
     },
     {
       title: (
@@ -196,6 +279,7 @@ export default function TeamMemberTab({
           rpm_limit: membership?.litellm_budget_table?.rpm_limit || null,
           budget_duration: membership?.litellm_budget_table?.budget_duration || null,
           allowed_models: membership?.litellm_budget_table?.allowed_models || [],
+          model_max_budget_in_team: membership?.litellm_budget_table?.model_max_budget || null,
         };
         setSelectedEditMember(enhancedMember);
         setIsEditMemberModalVisible(true);

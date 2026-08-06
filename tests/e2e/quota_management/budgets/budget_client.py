@@ -12,21 +12,20 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime
 
 from pydantic import AliasPath, BaseModel, Field, RootModel
 
-from e2e_http import NoBody, Result, StreamingResponse, Success, unwrap
 from proxy_client import ProxyClient
+from e2e_http import AuthHeaders, NoBody, Result, StreamingResponse, Success, unwrap
 from models import (
-    AnthropicMessagesBody,
     BudgetWindow,
-    BudgetWindowState,
     ChatBody,
     ChatMessage,
     ChatMetadata,
     KeyGenerateBody,
+    KeyInfo,
     ModelBudgetEntry,
+    ModelMaxBudgetUsageEntry,
 )
 
 _TEAM_READY_ATTEMPTS = 15
@@ -94,9 +93,20 @@ class TeamMember(BaseModel):
 class TeamNewBody(BaseModel):
     team_alias: str
     max_budget: float | None = None
+    team_member_budget: float | None = None
+    team_member_budget_duration: str | None = None
     budget_duration: str | None = None
     organization_id: str | None = None
     budget_limits: list[BudgetWindow] | None = None
+    model_max_budget: dict[str, ModelBudgetEntry] | None = None
+    metadata: dict[str, object] | None = None
+
+
+class TeamUpdateBody(BaseModel):
+    team_id: str
+    model_max_budget: dict[str, ModelBudgetEntry] | None = None
+    team_member_budget: float | None = None
+    max_budget: float | None = None
 
 
 class TeamNewResponse(BaseModel):
@@ -111,6 +121,7 @@ class TeamMemberAddBody(BaseModel):
     team_id: str
     member: TeamMember
     max_budget_in_team: float | None = None
+    model_max_budget_in_team: dict[str, ModelBudgetEntry] | None = None
 
 
 class TeamMemberUpdateBody(BaseModel):
@@ -118,6 +129,7 @@ class TeamMemberUpdateBody(BaseModel):
     user_id: str
     max_budget_in_team: float | None = None
     budget_duration: str | None = None
+    model_max_budget_in_team: dict[str, ModelBudgetEntry] | None = None
 
 
 class TeamMembershipRow(BaseModel):
@@ -132,13 +144,22 @@ class TeamInfoParams(BaseModel):
     team_id: str
 
 
-class TeamInfoRow(BaseModel):
-    budget_limits: list[BudgetWindowState] | None = None
+class TeamMemberBudgetTable(BaseModel):
+    max_budget: float | None = None
+    budget_duration: str | None = None
+
+
+class TeamInfoDetail(BaseModel):
+    team_id: str
+    model_max_budget: dict[str, ModelBudgetEntry | dict[str, float | str]] | None = None
+    is_from_config: bool = False
+    team_member_budget_table: TeamMemberBudgetTable | None = None
+    metadata: dict[str, object] | None = None
 
 
 class TeamInfoResponse(BaseModel):
+    team_info: TeamInfoDetail | None = None
     team_memberships: list[TeamMembershipRow] = []
-    team_info: TeamInfoRow | None = None
 
 
 class TagNewBody(BaseModel):
@@ -180,8 +201,14 @@ class BudgetInfoResponse(RootModel[list[BudgetRow]]):
     pass
 
 
-def window_reset_at(windows: list[BudgetWindowState], budget_duration: str) -> datetime | None:
-    return next((w.reset_at for w in windows if w.budget_duration == budget_duration), None)
+class AnthropicV1Headers(AuthHeaders):
+    anthropic_version: str = Field(default="2023-06-01", alias="anthropic-version")
+
+
+class AnthropicV1MessageBody(BaseModel):
+    model: str
+    max_tokens: int
+    messages: list[ChatMessage]
 
 
 def is_budget_block(result: StreamingResponse) -> bool:
@@ -192,6 +219,33 @@ def is_budget_block(result: StreamingResponse) -> bool:
 def model_budget(model: str, limit: float, period: str = "30d") -> dict[str, ModelBudgetEntry]:
     """A model_max_budget entry: per-model cap with a reset window."""
     return {model: ModelBudgetEntry(budget_limit=limit, time_period=period)}
+
+
+def model_usage_entry(key_info: KeyInfo, model: str) -> ModelMaxBudgetUsageEntry | None:
+    if key_info.model_max_budget_usage is None:
+        return None
+    return key_info.model_max_budget_usage.get(model)
+
+
+def assert_model_usage(
+    key_info: KeyInfo,
+    model: str,
+    *,
+    min_spend: float = 0.0,
+    scope: str | None = None,
+) -> ModelMaxBudgetUsageEntry:
+    entry = model_usage_entry(key_info, model)
+    assert entry is not None, (
+        f"no model_max_budget_usage for {model!r}; got {key_info.model_max_budget_usage!r}"
+    )
+    assert entry.current_spend >= min_spend, (
+        f"expected current_spend >= {min_spend} for {model!r}, got {entry.current_spend}"
+    )
+    if scope is not None:
+        assert entry.scope == scope, (
+            f"expected scope {scope!r} for {model!r}, got {entry.scope!r}"
+        )
+    return entry
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,19 +286,8 @@ class BudgetClient:
     def delete_key(self, key: str) -> None:
         self.proxy.delete_key(key)
 
-    def key_budget_windows(self, key: str) -> list[BudgetWindowState]:
-        """A key's budget_limits windows as /key/info stores them. Each window's
-        reset_at is advanced by the reset job in the same pass that zeroes the
-        window's spend counter, so a strictly-later value proves the wipe ran."""
-        return self.proxy.key_info(key).budget_limits or []
-
-    def team_budget_windows(self, team_id: str) -> list[BudgetWindowState]:
-        """Team analog of key_budget_windows, read from /team/info."""
-        match self._team_info(team_id):
-            case Success(data=data) if data.team_info is not None:
-                return data.team_info.budget_limits or []
-            case _:
-                return []
+    def key_info(self, key: str) -> KeyInfo:
+        return self.proxy.key_info(key)
 
     def delete_customers(self, user_ids: list[str]) -> None:
         self.proxy.delete_customers(user_ids)
@@ -273,7 +316,7 @@ class BudgetClient:
             ),
         )
 
-    def messages(
+    def anthropic_messages(
         self,
         key: str,
         model: str,
@@ -283,11 +326,11 @@ class BudgetClient:
     ) -> StreamingResponse:
         return self.proxy.transport.send(
             "/v1/messages",
-            headers=self.proxy.transport.bearer(key),
-            json=AnthropicMessagesBody(
+            headers=AnthropicV1Headers(authorization=f"Bearer {key}"),
+            json=AnthropicV1MessageBody(
                 model=model,
-                messages=[ChatMessage(role="user", content=content)],
                 max_tokens=max_tokens,
+                messages=[ChatMessage(role="user", content=content)],
             ),
         )
 
@@ -382,9 +425,13 @@ class BudgetClient:
         *,
         alias: str,
         max_budget: float | None = None,
+        team_member_budget: float | None = None,
+        team_member_budget_duration: str | None = None,
         budget_duration: str | None = None,
         organization_id: str | None = None,
         budget_limits: list[BudgetWindow] | None = None,
+        model_max_budget: dict[str, ModelBudgetEntry] | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> str:
         team_id = unwrap(
             self.proxy.transport.post(
@@ -393,15 +440,73 @@ class BudgetClient:
                 json=TeamNewBody(
                     team_alias=alias,
                     max_budget=max_budget,
+                    team_member_budget=team_member_budget,
+                    team_member_budget_duration=team_member_budget_duration,
                     budget_duration=budget_duration,
                     organization_id=organization_id,
                     budget_limits=budget_limits,
+                    model_max_budget=model_max_budget,
+                    metadata=metadata,
                 ),
                 response_type=TeamNewResponse,
             )
         ).team_id
         self._wait_for_team(team_id)
         return team_id
+
+    def update_team(
+        self,
+        team_id: str,
+        *,
+        model_max_budget: dict[str, ModelBudgetEntry] | None = None,
+        team_member_budget: float | None = None,
+        max_budget: float | None = None,
+    ) -> None:
+        resp = self.proxy.transport.send(
+            "/team/update",
+            headers=self.proxy.transport.master,
+            json=TeamUpdateBody(
+                team_id=team_id,
+                model_max_budget=model_max_budget,
+                team_member_budget=team_member_budget,
+                max_budget=max_budget,
+            ),
+        )
+        assert resp.ok, resp.body
+
+    def update_team_raw(
+        self,
+        team_id: str,
+        *,
+        model_max_budget: dict[str, ModelBudgetEntry] | None = None,
+        team_member_budget: float | None = None,
+        max_budget: float | None = None,
+    ):
+        return self.proxy.transport.send(
+            "/team/update",
+            headers=self.proxy.transport.master,
+            json=TeamUpdateBody(
+                team_id=team_id,
+                model_max_budget=model_max_budget,
+                team_member_budget=team_member_budget,
+                max_budget=max_budget,
+            ),
+        )
+
+    def team_model_max_budget(self, team_id: str) -> dict[str, ModelBudgetEntry | dict[str, float | str]] | None:
+        result = self.proxy.transport.get(
+            "/team/info",
+            headers=self.proxy.transport.master,
+            params=TeamInfoParams(team_id=team_id),
+            response_type=TeamInfoResponse,
+        )
+        match result:
+            case Success(data=data):
+                if data.team_info is None:
+                    return None
+                return data.team_info.model_max_budget
+            case _:
+                return None
 
     def delete_team(self, team_id: str) -> None:
         _ = self.proxy.transport.post(
@@ -411,18 +516,15 @@ class BudgetClient:
             response_type=NoBody,
         )
 
-    def _team_info(self, team_id: str) -> Result[TeamInfoResponse]:
-        return self.proxy.transport.get(
-            "/team/info",
-            headers=self.proxy.transport.master,
-            params=TeamInfoParams(team_id=team_id),
-            response_type=TeamInfoResponse,
-        )
-
     def _wait_for_team(self, team_id: str) -> None:
         last: Result[TeamInfoResponse] | None = None
         for _ in range(_TEAM_READY_ATTEMPTS):
-            last = self._team_info(team_id)
+            last = self.proxy.transport.get(
+                "/team/info",
+                headers=self.proxy.transport.master,
+                params=TeamInfoParams(team_id=team_id),
+                response_type=TeamInfoResponse,
+            )
             match last:
                 case Success():
                     return
@@ -431,7 +533,14 @@ class BudgetClient:
         assert last is not None
         raise AssertionError(last)
 
-    def add_team_member(self, team_id: str, user_id: str, *, max_budget_in_team: float | None = None) -> None:
+    def add_team_member(
+        self,
+        team_id: str,
+        user_id: str,
+        *,
+        max_budget_in_team: float | None = None,
+        model_max_budget_in_team: dict[str, ModelBudgetEntry] | None = None,
+    ) -> None:
         last_body = ""
         for attempt in range(_TEAM_READY_ATTEMPTS):
             resp = self.proxy.transport.send(
@@ -441,6 +550,7 @@ class BudgetClient:
                     team_id=team_id,
                     member=TeamMember(role="user", user_id=user_id),
                     max_budget_in_team=max_budget_in_team,
+                    model_max_budget_in_team=model_max_budget_in_team,
                 ),
             )
             if resp.ok:
@@ -459,6 +569,7 @@ class BudgetClient:
         *,
         max_budget_in_team: float | None = None,
         budget_duration: str | None = None,
+        model_max_budget_in_team: dict[str, ModelBudgetEntry] | None = None,
     ) -> None:
         resp = self.proxy.transport.send(
             "/team/member_update",
@@ -468,6 +579,7 @@ class BudgetClient:
                 user_id=user_id,
                 max_budget_in_team=max_budget_in_team,
                 budget_duration=budget_duration,
+                model_max_budget_in_team=model_max_budget_in_team,
             ),
         )
         assert resp.ok, resp.body
@@ -476,7 +588,13 @@ class BudgetClient:
         """The member's per-team budget_reset_at as /team/info reports it, or None if
         no reset is scheduled. The reset job advances this each time the window
         elapses; a job that skips the row leaves it pinned forever."""
-        match self._team_info(team_id):
+        result = self.proxy.transport.get(
+            "/team/info",
+            headers=self.proxy.transport.master,
+            params=TeamInfoParams(team_id=team_id),
+            response_type=TeamInfoResponse,
+        )
+        match result:
             case Success(data=data):
                 return next(
                     (row.budget_reset_at for row in data.team_memberships if row.user_id == user_id),

@@ -546,6 +546,27 @@ async def _get_team_member_budget_counter(
             )
             team_member_budget = _to_float(_get_value(default_budget, "max_budget"))
 
+    # Bitovi: config teams apply membership policy additives on top of the shared row.
+    try:
+        from litellm.proxy.proxy_server import prisma_client
+        from litellm_bitovi.proxy.config_teams import effective_team_member_max_budget_for_auth
+
+        team_metadata = team_object.metadata if isinstance(team_object.metadata, dict) else None
+        resolved = await effective_team_member_max_budget_for_auth(
+            team_metadata=team_metadata,
+            membership=team_membership,
+            prisma_client=prisma_client,
+            user_api_key_cache=user_api_key_cache,
+            linked_budget_max=team_member_budget,
+        )
+        if resolved is not None:
+            team_member_budget = resolved
+    except Exception:
+        verbose_proxy_logger.debug(
+            "Failed to resolve config-team member budget policy in budget_reservation",
+            exc_info=True,
+        )
+
     if team_member_budget is None or team_member_budget <= 0:
         return None
 

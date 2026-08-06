@@ -898,9 +898,9 @@ async def google_login(
         general_settings,
         premium_user,
         prisma_client,
-        user_api_key_cache,
         user_custom_ui_sso_sign_in_handler,
     )
+    from litellm_bitovi.proxy.sso.policy import should_enforce_non_premium_sso_user_limit
 
     microsoft_client_id = os.getenv("MICROSOFT_CLIENT_ID", None)
     google_client_id = os.getenv("GOOGLE_CLIENT_ID", None)
@@ -913,19 +913,30 @@ async def google_login(
         if is_disabled:
             return admin_ui_disabled()
 
-    ####### Check if user is a Enterprise / Premium User #######
-    if (
-        microsoft_client_id is not None
-        or google_client_id is not None
-        or generic_client_id is not None
-        or SAMLAuthHandler.is_saml_configured()
-    ):
-        await _raise_if_sso_exceeds_free_user_limit(premium_user, prisma_client)
 
     ####### Detect DB + MASTER KEY in .env #######
     missing_env_vars = show_missing_vars_in_env()
     if missing_env_vars is not None:
         return missing_env_vars
+
+    if should_enforce_non_premium_sso_user_limit() and premium_user is not True:
+        from litellm.repositories.user_repository import UserRepository
+
+        if prisma_client is None:
+            raise ProxyException(
+                message="No DB Connected. See https://docs.litellm.ai/docs/proxy/virtual_keys",
+                type=ProxyErrorTypes.auth_error,
+                param="prisma_client",
+                code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        billable_users = await UserRepository(prisma_client).count_billable_users()
+        if billable_users and billable_users > 5:
+            raise ProxyException(
+                message="You must be a LiteLLM Enterprise user to use SSO for more than 5 users. If you have a license please set `LITELLM_LICENSE` in your env. If you want to obtain a license meet with us here: https://enterprise.litellm.ai/demo You are seeing this error message because You set one of `MICROSOFT_CLIENT_ID`, `GOOGLE_CLIENT_ID`, or `GENERIC_CLIENT_ID` in your env. Please unset this",
+                type=ProxyErrorTypes.auth_error,
+                param="premium_user",
+                code=status.HTTP_403_FORBIDDEN,
+            )
 
     # get url from request - always use regular callback, but set state for CLI
     redirect_url = SSOAuthenticationHandler.get_redirect_url_for_sso(

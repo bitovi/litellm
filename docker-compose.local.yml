@@ -1,0 +1,128 @@
+# Local UI + proxy verification with hot-reload (Postgres + Redis)
+#
+#   make local-up
+#   # or: docker compose -f docker-compose.local.yml --env-file docker/local.env up --build
+#
+# Proxy API + UI at /ui: http://localhost:4000/ui/
+# UI hot-reload (recommended for dashboard work): http://localhost:3000
+# Login: admin / sk-1234
+# Team Overview: Teams -> Local Demo
+#
+# Python edits under ./litellm and ./bitovi reload via --reload
+# (PYTHONPATH prefers /app/bitovi then /app).
+# UI edits: use the `ui` service on :3000 (Next HMR). To refresh :4000/ui,
+# run `npm run build` in ui/litellm-dashboard (out/ is bind-mounted).
+#
+# Optional provider keys: copy docker/local.env.example -> docker/local.env
+#
+# Headroom (prompt compression guardrail): http://localhost:8787/dashboard
+# Opt in per request with "guardrails": ["headroom-compression"] or attach to a virtual key.
+
+services:
+  litellm:
+    build:
+      context: .
+      target: runtime
+    image: litellm-local:ui-verify
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./docker/local_ui_verify_config.yaml:/app/config.yaml:ro
+      - ./litellm:/app/litellm
+      - ./bitovi:/app/bitovi
+      - ./ui/litellm-dashboard/out:/app/litellm/proxy/_experimental/out
+      - ./enterprise:/app/enterprise
+    command:
+      - "--config=/app/config.yaml"
+      - "--detailed_debug"
+      - "--reload"
+    environment:
+      LITELLM_MASTER_KEY: sk-1234
+      UI_USERNAME: admin
+      UI_PASSWORD: sk-1234
+      DATABASE_URL: postgresql://llmproxy:dbpassword9090@db:5432/litellm
+      STORE_MODEL_IN_DB: "True"
+      PYTHONPATH: /app/bitovi:/app
+      PYTHONDONTWRITEBYTECODE: "1"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      HEADROOM_API_BASE: http://headroom:8787
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      headroom:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness')"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  headroom:
+    image: ghcr.io/chopratejas/headroom:0.6.7-code-nonroot@sha256:2b227f950c566ecd23df5e30c8c685b381459554c33eff8f9883661582d5d461
+    ports:
+      - "8787:8787"
+    environment:
+      HEADROOM_TELEMETRY: "off"
+      HEADROOM_COMPRESS_USER_MESSAGES: "1"
+      HEADROOM_HOST: "0.0.0.0"
+      HEADROOM_PORT: "8787"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  ui:
+    image: node:20.18-alpine3.20@sha256:3488b10bf958af7125a176419d2d8a9937d895bf124012aae811651988d2ffe6
+    working_dir: /ui
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./ui/litellm-dashboard:/ui
+      - ui_node_modules:/ui/node_modules
+    environment:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_BASE_URL: http://localhost:4000
+    command:
+      - sh
+      - -c
+      - npm ci --prefer-offline && npm run dev -- --hostname 0.0.0.0 --port 3000
+    depends_on:
+      litellm:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: llmproxy
+      POSTGRES_PASSWORD: dbpassword9090
+    ports:
+      - "5432:5432"
+    volumes:
+      - litellm_local_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d litellm -U llmproxy"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  litellm_local_postgres:
+  ui_node_modules:

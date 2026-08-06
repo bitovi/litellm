@@ -21,6 +21,17 @@ How it solves it:
 
 <!-- if you are an internal contributor, add "Resolves " followed by the Linear ticket e.g., "Resolves LIT-1234" to link the Linear ticket to the GitHub PR. If you don't have one, leave the section blank rather than guessing -->
 
+## Bitovi fork checklist
+
+**Complete for PRs into `litellm_internal_staging`**
+
+- [ ] New logic lives under `bitovi/litellm_bitovi/` or an owned UI folder when possible
+- [ ] Shared upstream file edits are thin call-outs only (or justified in Changes)
+- [ ] Tests live under `tests/test_litellm/bitovi/` for Bitovi-owned behavior
+- [ ] Upstream sync PRs use a **merge commit** (do not squash)
+
+See [FORK.md](../FORK.md) and [bitovi/litellm_bitovi/README.md](../bitovi/litellm_bitovi/README.md)
+
 ## Pre-Submission checklist
 
 **Please complete all items before asking a LiteLLM maintainer to review your PR**

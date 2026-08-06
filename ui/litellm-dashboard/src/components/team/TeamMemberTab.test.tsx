@@ -27,8 +27,6 @@ const mockSetSelectedEditMember = vi.fn();
 const mockSetIsEditMemberModalVisible = vi.fn();
 const mockSetIsAddMemberModalVisible = vi.fn();
 
-const budgetResetIso = new Date(2026, 6, 15, 12, 0, 0).toISOString();
-
 const createMockTeamData = (overrides: Partial<TeamData> = {}): TeamData => ({
   team_id: "team-123",
   team_info: {
@@ -71,6 +69,7 @@ const createMockTeamData = (overrides: Partial<TeamData> = {}): TeamData => ({
       team_id: "team-123",
       budget_id: "budget1",
       spend: 100.5,
+      total_spend: 100.5,
       litellm_budget_table: {
         budget_id: "budget1",
         soft_budget: null,
@@ -80,7 +79,7 @@ const createMockTeamData = (overrides: Partial<TeamData> = {}): TeamData => ({
         rpm_limit: 100,
         model_max_budget: null,
         budget_duration: null,
-        budget_reset_at: budgetResetIso,
+        budget_reset_at: null,
       },
     },
   ],
@@ -205,7 +204,7 @@ describe("TeamMembersComponent", () => {
       />,
     );
 
-    expect(screen.getAllByText("-").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("-")).toBeInTheDocument();
   });
 
   it("should display Default Proxy Admin tag for default_user_id", () => {
@@ -246,15 +245,52 @@ describe("TeamMembersComponent", () => {
       />,
     );
 
-    expect(screen.getByText("$100.5000")).toBeInTheDocument();
+    expect(screen.getAllByText(/\$100\.5/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/of \$1,?000/)).toBeInTheDocument();
+    expect(screen.getByText(/10\.1% used/)).toBeInTheDocument();
     expect(screen.getByText(/100 RPM/)).toBeInTheDocument();
     expect(screen.getByText(/10000 TPM/)).toBeInTheDocument();
   });
 
-  it("should display the budget reset date for member with a budget reset", () => {
+  it("should show effective member budget including temp boost", () => {
     renderWithProviders(
       <TeamMembersComponent
-        teamData={createMockTeamData()}
+        teamData={createMockTeamData({
+          team_info: {
+            ...createMockTeamData().team_info,
+            team_member_budget_table: {
+              max_budget: 100,
+              budget_duration: "30d",
+              tpm_limit: null,
+              rpm_limit: null,
+            },
+          },
+          team_memberships: [
+            {
+              user_id: "user1@test.com",
+              team_id: "team-123",
+              budget_id: "budget1",
+              spend: 0,
+              total_spend: 0,
+              metadata: {
+                bitovi_budget_policy: {
+                  temp_additive: 50,
+                },
+              },
+              litellm_budget_table: {
+                budget_id: "budget1",
+                soft_budget: null,
+                max_budget: 100,
+                max_parallel_requests: null,
+                tpm_limit: null,
+                rpm_limit: null,
+                model_max_budget: null,
+                budget_duration: "30d",
+                budget_reset_at: null,
+              },
+            },
+          ],
+        })}
         canEditTeam={false}
         handleMemberDelete={mockHandleMemberDelete}
         setSelectedEditMember={mockSetSelectedEditMember}
@@ -263,10 +299,11 @@ describe("TeamMembersComponent", () => {
       />,
     );
 
-    expect(screen.getByText("Jul 15, 2026")).toBeInTheDocument();
+    expect(screen.getByText(/of \$150/)).toBeInTheDocument();
+    expect(screen.getByText(/\+\$50 temp/)).toBeInTheDocument();
   });
 
-  it("should display formatted budget and Unlimited for member with no budget", () => {
+  it("should display No Limit for budget when member has no budget", () => {
     renderWithProviders(
       <TeamMembersComponent
         teamData={createMockTeamData()}
@@ -278,8 +315,7 @@ describe("TeamMembersComponent", () => {
       />,
     );
 
-    expect(screen.getByText("$1,000.0000")).toBeInTheDocument();
-    expect(screen.getByText("Unlimited")).toBeInTheDocument();
+    expect(screen.getByText("No Limit")).toBeInTheDocument();
   });
 
   it("should display No Limits for rate limits when member has no limits", () => {

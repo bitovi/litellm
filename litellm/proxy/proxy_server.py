@@ -681,7 +681,16 @@ except ImportError:
 
 server_root_path = get_server_root_path()
 _license_check = LicenseCheck()
-premium_user: bool = _license_check.is_premium()
+
+
+def _resolve_premium_user(license_says_premium: bool) -> bool:
+    # Bitovi: unlock Enterprise-gated features (guardrails, etc.) without LITELLM_LICENSE.
+    from litellm_bitovi.proxy.license.policy import resolve_premium_user
+
+    return resolve_premium_user(license_says_premium)
+
+
+premium_user: bool = _resolve_premium_user(_license_check.is_premium())
 premium_user_data: Optional["EnterpriseLicenseData"] = _license_check.airgapped_license_data
 global_max_parallel_request_retries_env: Optional[str] = os.getenv("LITELLM_GLOBAL_MAX_PARALLEL_REQUEST_RETRIES")
 proxy_state = ProxyState()
@@ -917,7 +926,7 @@ async def proxy_startup_event(app: FastAPI):
         "litellm.proxy.proxy_server.py::startup() - CHECKING PREMIUM USER - {}".format(premium_user)
     )
     if premium_user is False:
-        premium_user = _license_check.is_premium()
+        premium_user = _resolve_premium_user(_license_check.is_premium())
 
     ## CHECK MASTER KEY IN ENVIRONMENT ##
     master_key = get_secret_str("LITELLM_MASTER_KEY")
@@ -1085,6 +1094,8 @@ async def proxy_startup_event(app: FastAPI):
             proxy_batch_write_at=proxy_batch_write_at,
             proxy_logging_obj=proxy_logging_obj,
         )
+
+        await ProxyStartupEvent._sync_config_teams()
 
         await ProxyStartupEvent._update_default_team_member_budget()
 
@@ -1999,6 +2010,8 @@ config_passthrough_endpoints: Optional[List[Dict[str, Any]]] = None
 log_file = "api_log.json"
 worker_config = None
 master_key: Optional[str] = None
+config_teams: tuple = ()
+config_teams_model_list: Optional[list] = None
 config_agents: Optional[List[AgentConfig]] = None
 otel_logging = False
 prisma_client: Optional[PrismaClient] = None
@@ -4349,7 +4362,7 @@ class ProxyConfig:
             # check if litellm_license in general_settings
             if "LITELLM_LICENSE" in environment_variables:
                 _license_check.license_str = os.getenv("LITELLM_LICENSE", None)
-                premium_user = _license_check.is_premium()
+                premium_user = _resolve_premium_user(_license_check.is_premium())
         return
 
     async def load_config(self, router: Optional[litellm.Router], config_file_path: str):
@@ -4385,7 +4398,9 @@ class ProxyConfig:
             health_check_details, \
             proxy_batch_polling_interval, \
             proxy_config_reload_interval_seconds, \
-            config_passthrough_endpoints
+            config_passthrough_endpoints, \
+            config_teams, \
+            config_teams_model_list
 
         config: dict = await self.get_config(config_file_path=config_file_path)
 
@@ -4931,7 +4946,7 @@ class ProxyConfig:
             # check if litellm_license in general_settings
             if "litellm_license" in general_settings:
                 _license_check.license_str = general_settings["litellm_license"]
-                premium_user = _license_check.is_premium()
+                premium_user = _resolve_premium_user(_license_check.is_premium())
 
         router_params: dict = {
             "cache_responses": litellm.cache is not None,  # cache if user passed in cache values
@@ -4967,6 +4982,16 @@ class ProxyConfig:
                 litellm_model_api_base = model["litellm_params"].get("api_base", None)
                 if "ollama" in litellm_model_name and litellm_model_api_base is None:
                     run_ollama_serve()
+
+        ## DECLARATIVE TEAMS (synced to DB on startup)
+        from litellm_bitovi.proxy.config_teams import parse_config_teams
+
+        config_teams = parse_config_teams(config.get("teams"))
+        config_teams_model_list = model_list
+        if config_teams:
+            print(  # noqa: T201
+                f"\033[32mLiteLLM: Config declares {len(config_teams)} team(s) for DB sync\033[0m"
+            )
 
         ## ASSISTANT SETTINGS
         assistants_config: Optional[AssistantsTypedDict] = None
@@ -7876,6 +7901,21 @@ class ProxyStartupEvent:
             )
         except Exception as e:
             verbose_proxy_logger.debug("Global spend cache warm-up at startup skipped or failed: %s", e)
+
+    @classmethod
+    async def _sync_config_teams(cls):
+        """Create/update teams declared in the proxy YAML `teams:` list."""
+        global config_teams, config_teams_model_list, master_key, prisma_client
+        if not config_teams:
+            return
+        from litellm_bitovi.proxy.config_teams import sync_config_teams
+
+        await sync_config_teams(
+            config_teams=config_teams,
+            model_list=config_teams_model_list,
+            prisma_client=prisma_client,
+            master_key=master_key,
+        )
 
     @classmethod
     async def _update_default_team_member_budget(cls):
@@ -16337,6 +16377,13 @@ app.include_router(organization_router)
 app.include_router(customer_router)
 app.include_router(management_v1_router)
 app.include_router(spend_management_router)
+# Bitovi: Headroom compression savings aggregates (non-redacted token stats)
+from litellm_bitovi.proxy.headroom.endpoints import router as bitovi_headroom_router
+
+app.include_router(bitovi_headroom_router)
+from litellm_bitovi.proxy.config_teams.endpoints import router as bitovi_team_budget_router
+
+app.include_router(bitovi_team_budget_router)
 app.include_router(caching_router)
 app.include_router(analytics_router)
 app.include_router(callback_management_endpoints_router)

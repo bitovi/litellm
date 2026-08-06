@@ -1,7 +1,5 @@
 "use client";
 
-import { useKeyDetailRouting } from "@/app/(dashboard)/api-keys/detailNavigation";
-import { useKeyInfo } from "@/app/(dashboard)/hooks/keys/useKeyInfo";
 import { useKeys } from "@/app/(dashboard)/hooks/keys/useKeys";
 import { useOrganizations } from "@/app/(dashboard)/hooks/organizations/useOrganizations";
 import { useAllTeams } from "@/app/(dashboard)/hooks/teams/useTeams";
@@ -18,11 +16,15 @@ import { Input } from "@/components/ui/input";
 import { useDebouncedValue } from "@tanstack/react-pacer/debouncer";
 import { ColumnFiltersState, OnChangeFn, PaginationState, SortingState } from "@tanstack/react-table";
 import { KeyRound } from "lucide-react";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Team } from "../key_team_helpers/key_list";
+import useAuthorized from "@/app/(dashboard)/hooks/useAuthorized";
+import { KeyResponse, Team } from "../key_team_helpers/key_list";
+import { transformKeyInfo } from "../key_team_helpers/transform_key_info";
+import { keyInfoV1Call } from "../networking";
 import KeyInfoView from "../templates/key_info_view";
 import { getKeyTableColumns, KEY_TABLE_HIDDEN_COLUMNS } from "./keyTableColumns";
+import { useVirtualKeySearchParam } from "./useVirtualKeySearchParam";
 
 interface VirtualKeysTableProps {
   headerActions?: React.ReactNode;
@@ -44,12 +46,16 @@ const FILTER_LABELS: Record<string, string> = {
 };
 
 export function VirtualKeysTable({ headerActions }: VirtualKeysTableProps) {
+  const { accessToken } = useAuthorized();
+  const { virtualKeyId, setVirtualKeyId } = useVirtualKeySearchParam();
   const { data: fetchedOrganizations } = useOrganizations();
   const organizations = useMemo(() => fetchedOrganizations ?? [], [fetchedOrganizations]);
   const { data: fetchedTeams } = useAllTeams();
   const allTeams = useMemo<Team[]>(() => fetchedTeams ?? [], [fetchedTeams]);
 
-  const { keyId: selectedKeyId, openKey, close: closeKeyDetail } = useKeyDetailRouting();
+  const [selectedKey, setSelectedKey] = useState<KeyResponse | null>(null);
+  const dismissedVirtualKeyRef = useRef<string | null>(null);
+  const previousVirtualKeyIdRef = useRef<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>(DEFAULT_SORTING);
   const [tablePagination, setTablePagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 50 });
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -104,19 +110,72 @@ export function VirtualKeysTable({ headerActions }: VirtualKeysTableProps) {
     setTablePagination((prev) => ({ ...prev, pageIndex: 0 }));
   }, []);
 
-  const columns = useMemo(
-    () => getKeyTableColumns({ allTeams, organizations, onSelectKey: (key) => openKey(key.token) }),
-    [allTeams, organizations, openKey],
+  const openKeyDetail = useCallback(
+    async (token: string, keyFromList: KeyResponse | null, syncUrl: boolean) => {
+      if (keyFromList) {
+        setSelectedKey(keyFromList);
+        if (syncUrl) {
+          setVirtualKeyId(token);
+        }
+        return;
+      }
+      if (!accessToken) {
+        return;
+      }
+      try {
+        const keyInfo = await keyInfoV1Call(accessToken, token);
+        setSelectedKey(transformKeyInfo(keyInfo));
+        if (syncUrl) {
+          setVirtualKeyId(token);
+        }
+      } catch (error) {
+        console.error("Error fetching virtual key info:", error);
+      }
+    },
+    [accessToken, setVirtualKeyId],
   );
 
-  const selectedKeyFromList = useMemo(
-    () => keyList.find((key) => key.token === selectedKeyId),
-    [keyList, selectedKeyId],
+  const handleSelectKey = useCallback(
+    (key: KeyResponse) => {
+      dismissedVirtualKeyRef.current = null;
+      void openKeyDetail(key.token, key, true);
+    },
+    [openKeyDetail],
   );
-  const { data: fetchedSelectedKey, isError: selectedKeyLoadFailed } = useKeyInfo(selectedKeyId, {
-    enabled: !selectedKeyFromList,
-  });
-  const selectedKey = selectedKeyFromList ?? fetchedSelectedKey;
+
+  const handleCloseKeyDetail = useCallback(() => {
+    dismissedVirtualKeyRef.current = virtualKeyId;
+    setSelectedKey(null);
+    setVirtualKeyId(null);
+  }, [setVirtualKeyId, virtualKeyId]);
+
+  useEffect(() => {
+    const previousVirtualKeyId = previousVirtualKeyIdRef.current;
+    previousVirtualKeyIdRef.current = virtualKeyId;
+
+    if (!virtualKeyId) {
+      dismissedVirtualKeyRef.current = null;
+      // Only close when the URL param was removed (back/replace), not while
+      // replaceState is still catching up after a local key click.
+      if (previousVirtualKeyId && selectedKey) {
+        setSelectedKey(null);
+      }
+      return;
+    }
+    if (dismissedVirtualKeyRef.current === virtualKeyId) {
+      return;
+    }
+    if (selectedKey?.token === virtualKeyId) {
+      return;
+    }
+    const fromList = keyList.find((key) => key.token === virtualKeyId) ?? null;
+    void openKeyDetail(virtualKeyId, fromList, false);
+  }, [keyList, openKeyDetail, selectedKey, virtualKeyId]);
+
+  const columns = useMemo(
+    () => getKeyTableColumns({ allTeams, organizations, onSelectKey: handleSelectKey }),
+    [allTeams, handleSelectKey, organizations],
+  );
 
   const teamOptions = useMemo(
     () =>
@@ -153,15 +212,12 @@ export function VirtualKeysTable({ headerActions }: VirtualKeysTableProps) {
     [allTeams, organizations],
   );
 
-  if (selectedKeyId) {
-    if (!selectedKey && !selectedKeyLoadFailed) {
-      return <div className="p-4 text-sm text-muted-foreground">Loading key...</div>;
-    }
+  if (selectedKey) {
     return (
       <div className="w-full h-full overflow-hidden">
         <KeyInfoView
-          keyId={selectedKeyId}
-          onClose={closeKeyDetail}
+          keyId={selectedKey.token}
+          onClose={handleCloseKeyDetail}
           keyData={selectedKey}
           teams={allTeams}
           onDelete={refetch}

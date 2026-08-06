@@ -5,6 +5,7 @@ import moment from "moment";
 import { LogEntry } from "../columns";
 import { formatNumberWithCommas } from "@/utils/dataUtils";
 import GuardrailViewer from "../GuardrailViewer/GuardrailViewer";
+import { HeadroomCompressionPanel } from "@/components/bitovi/HeadroomCompressionPanel";
 import EvalViewer from "../EvalViewer/EvalViewer";
 import { CostBreakdownViewer } from "../CostBreakdownViewer";
 import { ConfigInfoMessage } from "../ConfigInfoMessage";
@@ -177,6 +178,9 @@ export function LogDetailContent({ logEntry, isLoadingDetails = false, accessTok
           logEntry={logEntry}
         />
       )}
+
+      {/* Bitovi: Headroom before/after tokens (non-redacted metadata) */}
+      <HeadroomCompressionPanel metadata={metadata} />
 
       {/* Guardrail Data */}
       {hasGuardrailData && (

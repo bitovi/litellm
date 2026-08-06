@@ -9,12 +9,17 @@
 	lint-ruff-budget lint-ruff-budget-update lint-budget-update lint-gate \
 	install-dev install-proxy-dev install-test-deps install-hooks \
 	install-helm-unittest check-circular-imports check-import-safety pre-commit \
-	lint-install lint-fetch-base bootstrap
+	lint-install lint-fetch-base bootstrap \
+	fork-branch fork-sync-status upstream-branch \
+	local-up local-down local-logs
 
 # Default target
 help:
 	@echo "Available commands:"
 	@echo "  make bootstrap          - Provision a fresh clone/worktree"
+	@echo "  make local-up           - Docker Compose local proxy+UI (Postgres/Redis; see FORK.md)"
+	@echo "  make local-down         - Stop local Docker Compose stack"
+	@echo "  make local-logs         - Tail local Docker Compose logs"
 	@echo "  make install-dev        - Install development dependencies"
 	@echo "  make install-proxy-dev  - Install proxy development dependencies"
 	@echo "  make install-dev-ci     - Install dev dependencies (CI-compatible, pins OpenAI)"
@@ -51,6 +56,9 @@ help:
 	@echo "  make test-proxy-unit-b  - Run proxy_unit_tests (p-z, ~28 files)"
 	@echo "  make test-integration   - Run integration tests"
 	@echo "  make test-unit-helm     - Run helm unit tests"
+	@echo "  make fork-branch NAME=litellm_foo - Create Bitovi feature branch from litellm_internal_staging"
+	@echo "  make fork-sync-status   - Show latest upstream stable tag vs staging"
+	@echo "  make upstream-branch NAME=litellm_foo - Rare: branch from upstream/main for BerriAI PRs"
 
 UV := uv
 UV_RUN := $(UV) run --no-sync
@@ -252,7 +260,7 @@ test-unit-llms: install-test-deps
 	$(UV_RUN) pytest tests/test_litellm/llms --tb=short -vv -n 4 --durations=20
 
 test-unit-proxy-guardrails: install-test-deps
-	$(UV_RUN) pytest tests/test_litellm/proxy/guardrails tests/test_litellm/proxy/management_endpoints tests/test_litellm/proxy/management_helpers --tb=short -vv -n 4 --durations=20
+	$(UV_RUN) pytest tests/test_litellm/proxy/guardrails tests/test_litellm/proxy/management_endpoints tests/test_litellm/proxy/management_helpers tests/test_litellm/bitovi --tb=short -vv -n 4 --durations=20
 
 test-unit-proxy-core: install-test-deps
 	$(UV_RUN) pytest tests/test_litellm/proxy/auth tests/test_litellm/proxy/client tests/test_litellm/proxy/db tests/test_litellm/proxy/hooks tests/test_litellm/proxy/policy_engine --tb=short -vv -n 4 --durations=20
@@ -300,3 +308,28 @@ test-llm-translation-single: install-test-deps
 
 test-llm-translation-flush-vcr-cache:
 	$(UV_RUN) python tests/_flush_vcr_cache.py
+
+# Bitovi fork helpers (see FORK.md)
+fork-branch:
+	@chmod +x scripts/fork_helpers.sh
+	@NAME="$(NAME)" ./scripts/fork_helpers.sh fork-branch
+
+fork-sync-status:
+	@chmod +x scripts/fork_helpers.sh
+	@./scripts/fork_helpers.sh fork-sync-status
+
+upstream-branch:
+	@chmod +x scripts/fork_helpers.sh
+	@NAME="$(NAME)" ./scripts/fork_helpers.sh upstream-branch
+
+# Local Docker Compose (proxy + UI + Postgres + Redis). See FORK.md / docker/README.md
+local-up:
+	@test -f docker/local.env || cp docker/local.env.example docker/local.env
+	@set -a && . ./docker/local.env && set +a && \
+		docker compose -f docker-compose.local.yml up --build
+
+local-down:
+	docker compose -f docker-compose.local.yml down
+
+local-logs:
+	docker compose -f docker-compose.local.yml logs -f litellm ui

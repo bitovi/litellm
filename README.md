@@ -41,6 +41,29 @@
 
 ---
 
+## Bitovi Fork — Platform Deployment
+
+> **This is Bitovi's fork** (`bitovi/litellm`, branch `litellm_internal_staging`), deployed on the Bitovi platform (EKS/Argo CD) as **`claude-usage-proxy`** at **https://llm-proxy.bitovi-tools.com**. Everything below this section is upstream LiteLLM documentation.
+
+### How deployment works
+
+This repo owns **the image and the deploy description**; [`bitovi/claude-usage-proxy`](https://github.com/bitovi/claude-usage-proxy) owns **the LiteLLM config**. Neither repo's CI ever writes to the other — no cross-repo tokens.
+
+| To change… | Do this | What happens |
+|---|---|---|
+| **LiteLLM version / fork code** | Merge to `litellm_internal_staging`, then create a `vX.Y.Z` tag **targeting this branch** (UI: Releases → Draft a new release → Target: `litellm_internal_staging`) | [`publish-platform-proxy-image.yml`](.github/workflows/publish-platform-proxy-image.yml) builds `docker/Dockerfile.database`, pushes it to platform ECR, and self-commits the tag into `deploy/values.yaml` on `platform-deploy`. Argo CD rolls it out — no PR to merge. |
+| **Model routing / proxy config** (`litellm_config.yaml`) | PR to [`bitovi/claude-usage-proxy`](https://github.com/bitovi/claude-usage-proxy) `main`, editing `deploy/manifests/litellm_config.yaml` | On merge, that repo's CI bumps a config checksum, which restarts the proxy pods with the new config. No involvement from this repo. |
+| **Infra shape** (ingress host, Postgres size, autoscaling, Bedrock access, env vars) | PR to `litellm_internal_staging` editing [`deploy/values.yaml`](../../blob/litellm_internal_staging/deploy/values.yaml), then merge `litellm_internal_staging` → `platform-deploy` | Argo CD reads `deploy/values.yaml` from the `platform-deploy` branch as its `$values` source. |
+
+### Key facts
+
+- **`platform-deploy` branch** — the deploy ledger Argo CD tracks. Never merged back into `litellm_internal_staging`; only ever advanced by reviewed merges from `litellm_internal_staging` plus automated `image.tag` commits from the release workflow.
+- **Auth for CI** — GitHub OIDC; the ECR role ARN and repo URI arrive as Actions secrets (`ECR_PUSH_ROLE_ARN`, `ECR_REPOSITORY`) pushed automatically by the platform's External Secrets Operator. Nothing to configure by hand.
+- **Runtime AWS access** — the proxy pods call Bedrock via an IRSA role (`platform-managed/claude-usage-proxy-bedrock`); Postgres is an in-cluster CNPG cluster (`DATABASE_URL` injected from its generated secret); cache is a Valkey instance at `claude-usage-proxy-valkey-primary`.
+- **Platform definition** — the Argo CD Application, charts, and AWS resource templates live in [`bitovi-platform-services`](https://github.com/bitovi/bitovi-platform-services) (`gitops/apps/claude-usage-proxy.yaml`).
+
+---
+
 ## What is LiteLLM
 
 LiteLLM is an open source AI Gateway that gives you a single, unified interface to call 100+ LLM providers — OpenAI, Anthropic, Gemini, Bedrock, Azure, and more — using the OpenAI format.
