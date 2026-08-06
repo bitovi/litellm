@@ -25,6 +25,7 @@ app:
     LITELLM_MODE: PRODUCTION
     # Prefer prisma migrate deploy across upgrades.
     USE_PRISMA_MIGRATE: "True"
+    LITELLM_RUST: "true"
     # The Bitnami valkey chart names its Service <releaseName>-primary in
     # standalone mode - there is no bare "claude-usage-proxy-valkey" Service.
     REDIS_HOST: claude-usage-proxy-valkey-primary
