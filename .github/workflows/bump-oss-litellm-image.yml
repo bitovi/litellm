@@ -1,11 +1,11 @@
 name: Bump OSS LiteLLM image
 
-# Opens a PR against platform-deploy when BerriAI publishes a newer stable
-# ghcr.io/berriai/litellm tag. Does not merge; Prisma upgrades can be one-way.
+# Opens a PR against litellm_internal_staging when BerriAI publishes a newer
+# stable ghcr.io/berriai/litellm tag. Does not merge; Prisma upgrades can be
+# one-way.
 #
 # schedule: only runs from the default branch (litellm_internal_staging).
-# Cherry-pick this file there after the cutover or the Monday job never starts.
-# workflow_dispatch works from any branch that has this file.
+# workflow_dispatch still checks out and PRs against that branch.
 
 on:
   schedule:
@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DEPLOY_BRANCH: platform-deploy
+  BASE_BRANCH: litellm_internal_staging
   IMAGE_REPOSITORY: ghcr.io/berriai/litellm
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.DEPLOY_BRANCH }}
+          ref: ${{ env.BASE_BRANCH }}
 
       - name: Resolve latest stable vs pinned tag
         id: resolve
@@ -135,17 +135,17 @@ jobs:
           git add deploy/values.yaml
           git commit -m "chore(deps): bump ghcr.io/berriai/litellm from ${CURRENT} to ${LATEST} [skip ci]"
           git push -u origin "HEAD:${head}"
-          if [ "$(gh pr list --base "$DEPLOY_BRANCH" --head "$head" --json number --jq 'length')" != "0" ]; then
+          if [ "$(gh pr list --base "$BASE_BRANCH" --head "$head" --json number --jq 'length')" != "0" ]; then
             echo "PR already open for ${head}"
             exit 0
           fi
-          gh pr create --base "$DEPLOY_BRANCH" --head "$head" \
+          gh pr create --base "$BASE_BRANCH" --head "$head" \
             --title "chore(deps): bump ghcr.io/berriai/litellm from ${CURRENT} to ${LATEST}" \
             --body "$(cat <<EOF
           Weekly OSS LiteLLM bump: \`${IMAGE_REPOSITORY}:${CURRENT}\` -> \`${IMAGE_REPOSITORY}:${LATEST}\`.
 
           Do not auto-merge. Take a CNPG backup of \`claude-usage-proxy-db\` before merging; Prisma migrate on boot is one-way. Release notes: ${RELEASE_URL}
 
-          After merge, Argo reads \`deploy/values.yaml\` on \`platform-deploy\` and rolls https://llm-proxy.bitovi-tools.com.
+          After merge into \`${BASE_BRANCH}\`, promote \`deploy/values.yaml\` to \`platform-deploy\` for Argo to roll https://llm-proxy.bitovi-tools.com.
           EOF
           )"
