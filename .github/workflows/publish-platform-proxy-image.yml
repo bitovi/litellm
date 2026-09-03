@@ -1,5 +1,8 @@
 name: Publish platform proxy image
 
+# DEPRECATED. Production uses ghcr.io/berriai/litellm (see deploy/values.yaml).
+# Do not tag v* to publish a Bitovi fork image. Job is gated off.
+
 # Platform releases only: build + ECR push + self-commit the image tag into
 # this repo's own deploy/values.yaml (platform-deploy branch). Branch pushes
 # and PRs run .github/workflows/test.yml instead.
@@ -39,6 +42,7 @@ env:
 
 jobs:
   publish:
+    if: false
     runs-on: ubuntu-latest
     permissions:
       id-token: write

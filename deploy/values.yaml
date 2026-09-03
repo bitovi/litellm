@@ -7,9 +7,9 @@ app:
   # This repo, not claude-usage-proxy: ESO's per-app PushSecret
   # (bitovi-platform-services charts/platform-app-resources
   # container/github-secrets.yaml) targets whatever repo app.repo names, and
-  # THIS repo is the one that actually runs the release workflow and needs
-  # ECR_PUSH_ROLE_ARN/ECR_REPOSITORY - claude-usage-proxy builds no image and
-  # needs neither.
+  # THIS repo still owns deploy/values.yaml (infra + official OSS image tag).
+  # The Bitovi fork image is deprecated; do not publish via
+  # publish-platform-proxy-image.yml. claude-usage-proxy builds no image.
   repo: bitovi/litellm
   port: 4000
   logLevel: info
@@ -23,10 +23,11 @@ app:
     # standalone mode - there is no bare "claude-usage-proxy-valkey" Service.
     REDIS_HOST: claude-usage-proxy-valkey-primary
     REDIS_PORT: "6379"
-# Do not edit by hand - update-deploy-values (publish-platform-proxy-image.yml)
-# writes this on every vX.Y.Z release.
+# Official BerriAI image. Weekly PRs from bump-oss-litellm-image.yml (Monday).
+# Do not tag the Bitovi fork to publish ECR. Pin a digest after a good pull.
 image:
-  tag: "v0.0.20"
+  repository: ghcr.io/berriai/litellm
+  tag: v1.98.0
 ingress:
   host: llm-proxy.bitovi-tools.com
 onePasswordItem:
