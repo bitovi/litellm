@@ -1,0 +1,151 @@
+name: Bump OSS LiteLLM image
+
+# Opens a PR against litellm_internal_staging when BerriAI publishes a newer
+# stable ghcr.io/berriai/litellm tag. Does not merge; Prisma upgrades can be
+# one-way.
+#
+# schedule: only runs from the default branch (litellm_internal_staging).
+# workflow_dispatch still checks out and PRs against that branch.
+
+on:
+  schedule:
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-oss-litellm-image
+  cancel-in-progress: false
+
+env:
+  BASE_BRANCH: litellm_internal_staging
+  IMAGE_REPOSITORY: ghcr.io/berriai/litellm
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASE_BRANCH }}
+
+      - name: Resolve latest stable vs pinned tag
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+          from pathlib import Path
+
+          stable = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+          token = os.environ["GITHUB_TOKEN"]
+          out = Path(os.environ["GITHUB_OUTPUT"])
+
+          def write(**kwargs: str) -> None:
+              with out.open("a", encoding="utf-8") as fh:
+                  for key, value in kwargs.items():
+                      fh.write(f"{key}={value}\n")
+
+          text = Path("deploy/values.yaml").read_text()
+          block = re.search(r"^image:\n((?:  .+\n?)+)", text, re.M)
+          if not block:
+              raise SystemExit("deploy/values.yaml has no image: block")
+          repo_m = re.search(r"repository:\s*(\S+)", block.group(0))
+          tag_m = re.search(r"tag:\s*\"?([^\"\n ]+)\"?", block.group(0))
+          repo = (repo_m.group(1) if repo_m else "").strip()
+          current = (tag_m.group(1) if tag_m else "").strip()
+          if repo != os.environ["IMAGE_REPOSITORY"]:
+              write(should_bump="false", current=current or "unset", latest="n/a", release_url="")
+              print(f"skip: image.repository is {repo!r}, want {os.environ['IMAGE_REPOSITORY']}")
+              raise SystemExit(0)
+
+          req = urllib.request.Request(
+              "https://api.github.com/repos/BerriAI/litellm/releases?per_page=100",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "bitovi-litellm-oss-bump",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(req) as resp:
+              releases = json.load(resp)
+
+          candidates = []
+          for release in releases:
+              if release.get("prerelease") or release.get("draft"):
+                  continue
+              parsed = stable.match(release["tag_name"])
+              if parsed is None:
+                  continue
+              version = tuple(int(part) for part in parsed.groups())
+              tag = f"v{parsed.group(1)}.{parsed.group(2)}.{parsed.group(3)}"
+              candidates.append((version, tag, release.get("html_url", "")))
+          if not candidates:
+              raise SystemExit("no stable BerriAI/litellm releases found")
+          version, latest, url = max(candidates, key=lambda item: item[0])
+          current_m = stable.match(current)
+          current_v = tuple(int(part) for part in current_m.groups()) if current_m else (0, 0, 0)
+          should = "true" if version > current_v else "false"
+          write(should_bump=should, current=current, latest=latest, release_url=url)
+          print(f"current={current} latest={latest} should_bump={should}")
+          PY
+
+      - name: Skip when already current
+        if: steps.resolve.outputs.should_bump != 'true'
+        run: echo "Pinned ${{ steps.resolve.outputs.current }} is current (latest stable ${{ steps.resolve.outputs.latest }})."
+
+      - name: Open version bump PR
+        if: steps.resolve.outputs.should_bump == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT: ${{ steps.resolve.outputs.current }}
+          LATEST: ${{ steps.resolve.outputs.latest }}
+          RELEASE_URL: ${{ steps.resolve.outputs.release_url }}
+        run: |
+          set -euo pipefail
+          head="chore/oss-litellm-${LATEST}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          latest = os.environ["LATEST"]
+          path = Path("deploy/values.yaml")
+          text = path.read_text()
+          new, n = re.subn(
+              r"(image:\n(?:  .+\n)*?  tag:\s*)\"?[^\n\"]+\"?",
+              rf"\g<1>{latest}",
+              text,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit(f"expected to replace image.tag once, replaced {n}")
+          path.write_text(new)
+          PY
+          git add deploy/values.yaml
+          git commit -m "chore(deps): bump ghcr.io/berriai/litellm from ${CURRENT} to ${LATEST} [skip ci]"
+          git push -u origin "HEAD:${head}"
+          if [ "$(gh pr list --base "$BASE_BRANCH" --head "$head" --json number --jq 'length')" != "0" ]; then
+            echo "PR already open for ${head}"
+            exit 0
+          fi
+          gh pr create --base "$BASE_BRANCH" --head "$head" \
+            --title "chore(deps): bump ghcr.io/berriai/litellm from ${CURRENT} to ${LATEST}" \
+            --body "$(cat <<EOF
+          Weekly OSS LiteLLM bump: \`${IMAGE_REPOSITORY}:${CURRENT}\` -> \`${IMAGE_REPOSITORY}:${LATEST}\`.
+
+          Do not auto-merge. Take a CNPG backup of \`claude-usage-proxy-db\` before merging; Prisma migrate on boot is one-way. Release notes: ${RELEASE_URL}
+
+          After merge into \`${BASE_BRANCH}\`, promote \`deploy/values.yaml\` to \`platform-deploy\` for Argo to roll https://llm-proxy.bitovi-tools.com.
+          EOF
+          )"
