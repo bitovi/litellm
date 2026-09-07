@@ -34,7 +34,7 @@ app:
 # Do not tag the Bitovi fork to publish ECR. Pin a digest after a good pull.
 image:
   repository: ghcr.io/berriai/litellm
-  tag: v1.98.0
+  tag: v1.100.0
 ingress:
   host: llm-proxy.bitovi-tools.com
 
