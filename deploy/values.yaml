@@ -1,70 +1,169 @@
-kind: container
-iam:
-  oidcSubjects:
-    - repo:bitovi/litellm:ref:refs/tags/v*
-app:
-  name: claude-usage-proxy
-  # This repo, not claude-usage-proxy: ESO's per-app PushSecret
-  # (bitovi-platform-services charts/platform-app-resources
-  # container/github-secrets.yaml) targets whatever repo app.repo names, and
-  # THIS repo still owns deploy/values.yaml (infra + official OSS image tag).
-  # The Bitovi fork image is deprecated; do not publish via
-  # publish-platform-proxy-image.yml. claude-usage-proxy builds no image.
-  repo: bitovi/litellm
-  port: 4000
-  logLevel: info
-  healthPath: /health/liveliness
-  envSecretName: claude-usage-proxy-secrets
-  env:
-    PROXY_BASE_URL: https://llm-proxy.bitovi-tools.com
-    ALLOWED_EMAIL_DOMAINS: bitovi.com
-    LITELLM_USE_SHORT_MCP_TOOL_PREFIX: "true"
-    # The Bitnami valkey chart names its Service <releaseName>-primary in
-    # standalone mode - there is no bare "claude-usage-proxy-valkey" Service.
-    REDIS_HOST: claude-usage-proxy-valkey-primary
-    REDIS_PORT: "6379"
+# Platform app interface (bitovi-platform-services: charts/interface). One
+# file describes the whole app: the LiteLLM proxy (main), its Headroom
+# prompt-compression companion, and the model-request Slack bot.
+#
+# This repo, not claude-usage-proxy, owns this file: ESO's per-app PushSecret
+# targets whatever repo `repo` below names, and this repo's own release CI
+# (bump-oss-litellm-image.yml) only ever writes workloads.main.image.tag — no
+# cross-repo token needed. claude-usage-proxy owns a second, much smaller
+# values file (deploy/rollout.yaml) layered on top by the Argo CD Application
+# (platform-apps/apps/claude-usage-proxy.yaml): just the config-change
+# checksum annotation that forces a LiteLLM rollout.
+#
 # Official BerriAI image. Weekly PRs from bump-oss-litellm-image.yml (Monday).
-# Do not tag the Bitovi fork to publish ECR. Pin a digest after a good pull.
-image:
-  repository: ghcr.io/berriai/litellm
-  tag: v1.99.1
-ingress:
-  host: llm-proxy.bitovi-tools.com
-onePasswordItem:
-  enabled: true
-  itemPath: vaults/bitovi-platform/items/claude-usage-proxy-secrets
-  annotations:
-    operator.1password.io/auto-restart: "true"
-postgres:
-  enabled: true
-  instances: 2
-  database: litellm
-  storage:
-    size: 20Gi
+# Do not tag the Bitovi fork to publish ECR — that pipeline is deprecated
+# (see publish-platform-proxy-image.yml). claude-usage-proxy builds no image
+# either; model-request-bot and headroom run fixed third-party images.
+name: claude-usage-proxy
+repo: bitovi/litellm
+
+workloads:
+  main:
+    kind: server
+    port: 4000
+    health: /health/liveliness
+    domain: llm-proxy.bitovi-tools.com
+    secrets: op://bitovi-platform/claude-usage-proxy-secrets
+    env:
+      PROXY_BASE_URL: https://llm-proxy.bitovi-tools.com
+      ALLOWED_EMAIL_DOMAINS: bitovi.com
+      LITELLM_USE_SHORT_MCP_TOOL_PREFIX: "true"
+      # The Bitnami valkey chart names its Service <releaseName>-primary in
+      # standalone mode - there is no bare "claude-usage-proxy-valkey" Service.
+      REDIS_HOST: claude-usage-proxy-valkey-primary
+      REDIS_PORT: "6379"
+    image:
+      repository: ghcr.io/berriai/litellm
+      tag: v1.99.1
+    iam:
+      oidcSubjects:
+        - "repo:bitovi/litellm:ref:refs/tags/v*"
+    capabilities:
+      - bedrock
+    uses:
+      - db
+    autoscaling:
+      min: 1
+      max: 4
+    advanced:
+      command: ["litellm", "--config", "/app/config.yaml", "--port", "4000"]
+      configFiles:
+        litellm-config:
+          mountPath: /app/config.yaml
+          subPath: litellm_config.yaml
+      # workloads.main.advanced.podAnnotations comes from claude-usage-proxy's
+      # own deploy/rollout.yaml, layered on top of this file.
+
+  # Prompt compression, called by main as an in-cluster guardrail (see
+  # litellm_config.yaml: guardrails[0].litellm_params.api_base). Internal
+  # only — no domain, so no public Ingress, Service only.
+  headroom:
+    kind: server
+    port: 8787
+    # Third-party image exposes distinct /livez and /readyz; the platform
+    # interface has one health path. /readyz is the meaningful one for
+    # traffic-readiness, and is a reasonable liveness check too.
+    health: /readyz
+    replicas: 2
+    # Pin digest (supply-chain). Tag 0.6.7-code-nonroot includes tree-sitter
+    # for code compression.
+    image:
+      repository: ghcr.io/chopratejas/headroom
+      tag: "0.6.7-code-nonroot@sha256:2b227f950c566ecd23df5e30c8c685b381459554c33eff8f9883661582d5d461"
+    env:
+      HEADROOM_TELEMETRY: "off"
+      # Per LiteLLM Headroom docs: without this, Claude Code user-role
+      # traffic is skipped. Coding agents still compress conservatively to
+      # protect prefix cache (not the flagship non-coding compression
+      # ratios).
+      HEADROOM_COMPRESS_USER_MESSAGES: "1"
+      HEADROOM_HOST: "0.0.0.0"
+      HEADROOM_PORT: "8787"
+    resources:
+      cpu: 100m
+      memory: 512Mi
+
+  # Slack bot (Socket Mode: exactly one consumer, do not scale) that handles
+  # model-access requests. Its own bedrock capability (ListFoundationModels +
+  # Mantle /models) rather than sharing main's ServiceAccount — same
+  # permissions, a separate IRSA role.
+  model-request-bot:
+    kind: server
+    port: 8080
+    health: /healthz
+    replicas: 1
+    image:
+      repository: python
+      tag: "3.13-slim"
+    capabilities:
+      - bedrock
+    env:
+      PORT: "8080"
+      LOG_LEVEL: INFO
+      AWS_REGION: us-east-2
+      AWS_DEFAULT_REGION: us-east-2
+      BEDROCK_MANTLE_IAM_READY: "true"
+      LITELLM_CONFIG_PATH: /config/litellm_config.yaml
+      GITHUB_REPO: bitovi/claude-usage-proxy
+    # Individually scoped secretKeyRefs, not envFrom the whole
+    # claude-usage-proxy-secrets Secret (which also carries main's
+    # LITELLM_MASTER_KEY etc. that this bot doesn't need).
+    extraEnv:
+      - name: SLACK_BOT_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: claude-usage-proxy-secrets
+            key: SLACK_BOT_TOKEN
+      - name: SLACK_APP_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: claude-usage-proxy-secrets
+            key: SLACK_APP_TOKEN
+      - name: PROXY_ADMIN_SLACK_IDS
+        valueFrom:
+          secretKeyRef:
+            name: claude-usage-proxy-secrets
+            key: PROXY_ADMIN_SLACK_IDS
+      - name: MODEL_REQUEST_GITHUB_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: claude-usage-proxy-secrets
+            key: MODEL_REQUEST_GITHUB_TOKEN
+    resources:
+      cpu: 50m
+      memory: 256Mi
+    advanced:
+      command:
+        - sh
+        - -c
+        - |
+          pip install --no-cache-dir -q 'slack-bolt>=1.21,<2' 'PyYAML>=6,<7' 'boto3>=1.34,<2' &&
+          exec python -u /app/model_request_bot.py
+      # configFiles only models one ConfigMap mount (SYSTEMS-917); the second
+      # (the whole litellm-config dir) goes through the raw volumes/
+      # volumeMounts escape hatch instead.
+      configFiles:
+        model-request-bot-code:
+          mountPath: /app/model_request_bot.py
+          subPath: model_request_bot.py
+      volumes:
+        - name: litellm-config
+          configMap:
+            name: litellm-config
+      volumeMounts:
+        - name: litellm-config
+          mountPath: /config
+          readOnly: true
+
+dependencies:
+  db:
+    type: postgres
+    instances: 2
+    storage: 20Gi
     storageClass: gp3
-  backup:
-    enabled: true
-bedrock:
-  enabled: true
-  serviceAccountName: claude-usage-proxy
-  serviceAccountNamespace: claude-usage-proxy
-database:
-  fromCnpg:
-    enabled: true
-configMap:
-  name: litellm-config
-  mountPath: /app/config.yaml
-  subPath: litellm_config.yaml
-container:
-  command:
-    - litellm
-    - --config
-    - /app/config.yaml
-    - --port
-    - "4000"
-replicaCount: 1
-autoscaling:
-  enabled: true
-  minReplicas: 1
-  maxReplicas: 4
-  targetCPUUtilizationPercentage: 70
+    backup: true
+    database: litellm
+    owner: litellm
+
+infra:
+  hostedZone: bitovi-tools-com

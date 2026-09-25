@@ -37,6 +37,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          export REPO="$(yq '.workloads.main.image.repository' deploy/values.yaml)"
+          export CURRENT="$(yq '.workloads.main.image.tag' deploy/values.yaml)"
           python3 <<'PY'
           import json
           import os
@@ -53,14 +55,8 @@ jobs:
                   for key, value in kwargs.items():
                       fh.write(f"{key}={value}\n")
 
-          text = Path("deploy/values.yaml").read_text()
-          block = re.search(r"^image:\n((?:  .+\n?)+)", text, re.M)
-          if not block:
-              raise SystemExit("deploy/values.yaml has no image: block")
-          repo_m = re.search(r"repository:\s*(\S+)", block.group(0))
-          tag_m = re.search(r"tag:\s*\"?([^\"\n ]+)\"?", block.group(0))
-          repo = (repo_m.group(1) if repo_m else "").strip()
-          current = (tag_m.group(1) if tag_m else "").strip()
+          repo = os.environ["REPO"]
+          current = os.environ["CURRENT"]
           if repo != os.environ["IMAGE_REPOSITORY"]:
               write(should_bump="false", current=current or "unset", latest="n/a", release_url="")
               print(f"skip: image.repository is {repo!r}, want {os.environ['IMAGE_REPOSITORY']}")
@@ -114,24 +110,7 @@ jobs:
           head="chore/oss-litellm-${LATEST}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          latest = os.environ["LATEST"]
-          path = Path("deploy/values.yaml")
-          text = path.read_text()
-          new, n = re.subn(
-              r"(image:\n(?:  .+\n)*?  tag:\s*)\"?[^\n\"]+\"?",
-              rf"\g<1>{latest}",
-              text,
-              count=1,
-          )
-          if n != 1:
-              raise SystemExit(f"expected to replace image.tag once, replaced {n}")
-          path.write_text(new)
-          PY
+          yq -i ".workloads.main.image.tag = \"${LATEST}\"" deploy/values.yaml
           git add deploy/values.yaml
           git commit -m "chore(deps): bump ghcr.io/berriai/litellm from ${CURRENT} to ${LATEST} [skip ci]"
           git push -u origin "HEAD:${head}"
