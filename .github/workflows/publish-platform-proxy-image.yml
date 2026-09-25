@@ -80,7 +80,7 @@ jobs:
           ref: ${{ env.DEPLOY_BRANCH }}
 
       - name: Write image tag into deploy values
-        run: yq -i '.image.tag = "${{ github.ref_name }}"' deploy/values.yaml
+        run: yq -i '.workloads.main.image.tag = "${{ github.ref_name }}"' deploy/values.yaml
 
       - name: Commit and push (rebase-and-retry on races)
         env:
